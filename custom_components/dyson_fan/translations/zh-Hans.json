@@ -3,40 +3,49 @@
   "config": {
     "step": {
       "user": {
-        "title": "配置功率反馈和红外动作",
-        "description": "请选择一个频繁更新的功率传感器，并配置控制风扇的四个动作。收到多次稳定功率上报前，风扇实体会保持不可用。",
+        "title": "配置功率反馈和红外指令",
+        "description": "请选择一个频繁更新的功率传感器、向风扇发射信号的红外发射器实体，以及每个风扇指令要发送的 Dyson Cool 红外码。收到多次稳定功率上报前，风扇实体会保持不可用。",
         "data": {
           "power_sensor": "功率传感器",
-          "power_toggle_action": "电源切换动作",
-          "oscillation_toggle_action": "摆风切换动作",
-          "speed_up_action": "提高风速动作",
-          "speed_down_action": "降低风速动作",
+          "infrared_emitter_entity_id": "红外发射器",
+          "power_toggle_code": "电源切换：红外码",
+          "oscillation_toggle_code": "摆风切换：红外码",
+          "speed_up_code": "提高风速：红外码",
+          "speed_down_code": "降低风速：红外码",
           "feedback_burst_action": "快速反馈动作（可选）"
         },
         "data_description": {
-          "feedback_burst_action": "请求新的功率读数前执行，可使用任意 Home Assistant 动作。"
+          "infrared_emitter_entity_id": "`infrared` 平台的发射器实体，例如 ESPHome 红外代理。",
+          "power_toggle_code": "风扇电源键发送的 Dyson Cool 红外码。原装 Dyson 遥控器使用独立的开机和关机码，而不是单个切换码，因此需要测试此处应使用哪个码。",
+          "feedback_burst_action": "针对功率计执行的任意 Home Assistant 动作，用于请求更快的上报。留空则跳过此优化。"
         }
       },
       "reconfigure": {
-        "title": "重新配置反馈和动作",
+        "title": "重新配置反馈和红外指令",
         "data": {
           "power_sensor": "功率传感器",
-          "power_toggle_action": "电源切换动作",
-          "oscillation_toggle_action": "摆风切换动作",
-          "speed_up_action": "提高风速动作",
-          "speed_down_action": "降低风速动作",
+          "infrared_emitter_entity_id": "红外发射器",
+          "power_toggle_code": "电源切换：红外码",
+          "oscillation_toggle_code": "摆风切换：红外码",
+          "speed_up_code": "提高风速：红外码",
+          "speed_down_code": "降低风速：红外码",
           "feedback_burst_action": "快速反馈动作（可选）"
         },
         "data_description": {
-          "feedback_burst_action": "请求新的功率读数前执行，可使用任意 Home Assistant 动作。"
+          "infrared_emitter_entity_id": "`infrared` 平台的发射器实体，例如 ESPHome 红外代理。",
+          "power_toggle_code": "风扇电源键发送的 Dyson Cool 红外码。原装 Dyson 遥控器使用独立的开机和关机码，而不是单个切换码，因此需要测试此处应使用哪个码。",
+          "feedback_burst_action": "针对功率计执行的任意 Home Assistant 动作，用于请求更快的上报。留空则跳过此优化。"
         }
       }
     },
     "error": {
-      "invalid_action": "请至少选择一个有效的 Home Assistant 动作。",
+      "invalid_emitter": "请选择有效的红外发射器实体。",
+      "invalid_code": "请为每个所需指令选择一个 Dyson Cool 红外码。",
+      "invalid_action": "快速反馈动作不是有效的 Home Assistant 动作序列。",
       "invalid_power_unit": "请使用 W、kW 等功率单位；无单位时按 W 处理。"
     },
     "abort": {
+      "no_emitters": "未找到红外发射器实体。请先设置红外发射器（例如 ESPHome 红外代理）。",
       "reconfigure_successful": "Dyson Fan 已成功重新配置。"
     }
   },
@@ -61,7 +70,7 @@
         },
         "data_description": {
           "max_attempts": "首次完整发送计为一次尝试。只有稳定反馈与目标不符时才会进行额外尝试。",
-          "ir_send_interval": "连续执行两个红外动作之间的时间。",
+          "ir_send_interval": "连续两次红外发送之间的间隔。",
           "calibration_mode": "端点模式根据 1 档和 10 档对当前曲线进行平移和缩放；完整模式会测量每个不摆风档位。"
         }
       },
@@ -94,6 +103,18 @@
       "options": {
         "endpoints": "端点",
         "full": "完整"
+      }
+    },
+    "dyson_code": {
+      "options": {
+        "ON": "开机",
+        "COOL_ON": "开机（凉风模式）",
+        "OFF": "关机",
+        "SWING": "摆风切换",
+        "SPEED_UP": "提高风速",
+        "SPEED_DOWN": "降低风速",
+        "TIME_UP": "定时增加",
+        "TIME_DOWN": "定时减少"
       }
     }
   },

@@ -13,6 +13,7 @@ from datetime import datetime
 from time import monotonic
 from typing import Any
 
+from homeassistant.components import infrared
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -38,6 +39,8 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.script import Script, async_validate_actions_config
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
+from infrared_protocols.codes.dyson.cool import DysonCoolCode
+from infrared_protocols.commands import Command as InfraredCommand
 
 from .calibration import (
     CalibrationCancelled,
@@ -64,13 +67,14 @@ from .const import (
     CALIBRATION_UNCHANGED_PROBES,
     CONF_CALIBRATION_MODE,
     CONF_FEEDBACK_BURST_ACTION,
+    CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
     CONF_MAX_ATTEMPTS,
-    CONF_OSCILLATION_TOGGLE_ACTION,
+    CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_SENSOR,
-    CONF_POWER_TOGGLE_ACTION,
-    CONF_SPEED_DOWN_ACTION,
-    CONF_SPEED_UP_ACTION,
+    CONF_POWER_TOGGLE_CODE,
+    CONF_SPEED_DOWN_CODE,
+    CONF_SPEED_UP_CODE,
     DEFAULT_CALIBRATION_MODE,
     DEFAULT_IR_SEND_INTERVAL,
     DEFAULT_MAX_ATTEMPTS,
@@ -121,11 +125,13 @@ class _ActionLogger(logging.LoggerAdapter):
 
 type ControllerListener = Callable[[], None]
 
-_COMMAND_ACTION_KEYS: Mapping[Command, str] = {
-    Command.POWER_TOGGLE: CONF_POWER_TOGGLE_ACTION,
-    Command.OSCILLATION_TOGGLE: CONF_OSCILLATION_TOGGLE_ACTION,
-    Command.SPEED_UP: CONF_SPEED_UP_ACTION,
-    Command.SPEED_DOWN: CONF_SPEED_DOWN_ACTION,
+# Maps each relative command to the config key holding its Dyson Cool IR
+# code name (e.g. "SWING", "SPEED_UP").
+_COMMAND_CODE_KEYS: Mapping[Command, str] = {
+    Command.POWER_TOGGLE: CONF_POWER_TOGGLE_CODE,
+    Command.OSCILLATION_TOGGLE: CONF_OSCILLATION_TOGGLE_CODE,
+    Command.SPEED_UP: CONF_SPEED_UP_CODE,
+    Command.SPEED_DOWN: CONF_SPEED_DOWN_CODE,
 }
 
 
@@ -136,7 +142,6 @@ class DysonFanController:
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        action_configs: Mapping[str, object],
     ) -> None:
         """Initialize the controller."""
         self.hass = hass
@@ -153,6 +158,15 @@ class DysonFanController:
             raise HomeAssistantError("The configured power sensor no longer exists")
         self.power_sensor = power_sensor
 
+        infrared_emitter_entity_id = er.async_resolve_entity_id(
+            registry, str(entry.data[CONF_INFRARED_EMITTER_ENTITY_ID])
+        )
+        if infrared_emitter_entity_id is None:
+            raise HomeAssistantError(
+                "The configured infrared emitter entity no longer exists"
+            )
+        self.infrared_emitter_entity_id = infrared_emitter_entity_id
+
         self.max_attempts = int(
             entry.options.get(CONF_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS)
         )
@@ -164,9 +178,19 @@ class DysonFanController:
         )
         self.decoder = PowerDecoder(PowerSignatureTable.from_options(entry.options))
         self.tracker = StablePowerTracker(STABLE_REPORTS_REQUIRED)
-        self._action_configs = action_configs
-        self._actions: dict[Command, Script] = {}
+
+        try:
+            self._ir_commands: dict[Command, InfraredCommand] = {
+                command: DysonCoolCode[str(entry.data[code_key])].to_command()
+                for command, code_key in _COMMAND_CODE_KEYS.items()
+            }
+        except KeyError as err:
+            raise HomeAssistantError(
+                f"Unknown Dyson infrared command code: {err}"
+            ) from err
+
         self._feedback_burst_action: Script | None = None
+        self._feedback_burst_config = entry.data.get(CONF_FEEDBACK_BURST_ACTION)
 
         self._store: Store[dict[str, Any]] = Store(
             hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}.{entry.entry_id}"
@@ -241,28 +265,18 @@ class DysonFanController:
             if 1 <= speed <= 10:
                 self.last_speed = speed
 
-        validated_actions: dict[Command, list[dict[str, Any]]] = {}
-        for command, key in _COMMAND_ACTION_KEYS.items():
-            raw_sequence = _normalize_action_sequence(self._action_configs[key])
-            validated_actions[command] = await async_validate_actions_config(
-                self.hass, deepcopy(raw_sequence)
+        if self.infrared_emitter_entity_id not in infrared.async_get_emitters(
+            self.hass
+        ):
+            raise HomeAssistantError(
+                f"Infrared emitter {self.infrared_emitter_entity_id} is not available"
             )
 
         validated_burst = None
-        if burst_config := self._action_configs.get(CONF_FEEDBACK_BURST_ACTION):
+        if burst_config := self._feedback_burst_config:
             raw_sequence = _normalize_action_sequence(burst_config)
             validated_burst = await async_validate_actions_config(
                 self.hass, deepcopy(raw_sequence)
-            )
-
-        for command, validated in validated_actions.items():
-            self._actions[command] = Script(
-                self.hass,
-                validated,
-                f"{self.entry.title} {command.value}",
-                DOMAIN,
-                log_exceptions=True,
-                logger=self._action_logger,
             )
 
         if validated_burst is not None:
@@ -306,9 +320,6 @@ class DysonFanController:
             with suppress(asyncio.CancelledError):
                 await self._calibration_task
 
-        for action in self._actions.values():
-            await action.async_unload()
-        self._actions.clear()
         if self._feedback_burst_action is not None:
             await self._feedback_burst_action.async_unload()
             self._feedback_burst_action = None
@@ -663,7 +674,8 @@ class DysonFanController:
         return revision == self.target_revision
 
     async def _async_send_command(self, command: Command, revision: int) -> bool:
-        """Run one configured action, observing spacing and target supersession."""
+        """Send one Dyson infrared code, observing spacing and target
+        supersession."""
         if self._last_ir_sent_monotonic is not None:
             remaining = self.ir_send_interval - (
                 monotonic() - self._last_ir_sent_monotonic
@@ -684,16 +696,16 @@ class DysonFanController:
         self.last_operation = dt_util.utcnow()
         self._notify_listeners()
         try:
-            await self._actions[command].async_run(context=self._context)
+            await self._async_send_ir(self._ir_commands[command])
         except (HomeAssistantError, RuntimeError, ValueError) as err:
-            self.last_error = f"action_error: {err}"
+            self.last_error = f"infrared_error: {err}"
             self._log.debug(
-                "[%s] IR action %s failed: %s", self.entry.entry_id, command.value, err
+                "[%s] IR command %s failed: %s", self.entry.entry_id, command.value, err
             )
             return False
         finally:
             self._last_ir_sent_monotonic = monotonic()
-        # The action may have transmitted before a newer target arrived. Report that
+        # The command may have transmitted before a newer target arrived. Report that
         # it ran so the caller updates supposed state, then re-plan at the next command
         # boundary using the new revision.
         self._log.debug(
@@ -702,6 +714,15 @@ class DysonFanController:
             command.value,
         )
         return True
+
+    async def _async_send_ir(self, command: InfraredCommand) -> None:
+        """Transmit one prepared command through the infrared emitter entity."""
+        await infrared.async_send_command(
+            self.hass,
+            self.infrared_emitter_entity_id,
+            command,
+            context=self._context,
+        )
 
     async def _async_calibrate(
         self, restore_target: TargetState, revision: int

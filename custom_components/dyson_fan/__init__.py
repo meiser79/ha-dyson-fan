@@ -20,8 +20,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
-    ACTION_KEYS,
-    CONF_FEEDBACK_BURST_ACTION,
+    CONF_INFRARED_EMITTER_ENTITY_ID,
     DOMAIN,
     PLATFORMS,
     STORAGE_KEY_PREFIX,
@@ -81,12 +80,17 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry[Any]) -> b
 
 async def async_setup_entry(hass: HomeAssistant, entry: DysonFanConfigEntry) -> bool:
     """Set up Dyson Fan from a config entry."""
+    if CONF_INFRARED_EMITTER_ENTITY_ID not in entry.data:
+        # Entries created before the move to Home Assistant's `infrared`
+        # platform stored four free-form actions and cannot be converted
+        # automatically: the infrared emitter has to be chosen by the user.
+        raise ConfigEntryError(
+            "This entry still uses remote actions. Use Reconfigure to select an "
+            "infrared emitter and a Dyson Cool code for each command."
+        )
     controller: DysonFanController | None = None
     try:
-        action_configs = {key: entry.data[key] for key in ACTION_KEYS}
-        if burst_action := entry.data.get(CONF_FEEDBACK_BURST_ACTION):
-            action_configs[CONF_FEEDBACK_BURST_ACTION] = burst_action
-        controller = DysonFanController(hass, entry, action_configs)
+        controller = DysonFanController(hass, entry)
         await controller.async_start()
     except (HomeAssistantError, KeyError, TypeError, ValueError, vol.Invalid) as err:
         raise ConfigEntryError(f"Invalid Dyson Fan configuration: {err}") from err

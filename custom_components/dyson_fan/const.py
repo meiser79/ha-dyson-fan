@@ -13,18 +13,35 @@ DEFAULT_NAME: Final = "Dyson Fan"
 PLATFORMS: Final = [Platform.FAN, Platform.SENSOR, Platform.BUTTON]
 
 CONF_POWER_SENSOR: Final = "power_sensor"
-CONF_POWER_TOGGLE_ACTION: Final = "power_toggle_action"
-CONF_OSCILLATION_TOGGLE_ACTION: Final = "oscillation_toggle_action"
-CONF_SPEED_UP_ACTION: Final = "speed_up_action"
-CONF_SPEED_DOWN_ACTION: Final = "speed_down_action"
-CONF_FEEDBACK_BURST_ACTION: Final = "feedback_burst_action"
 
-ACTION_KEYS: Final = (
-    CONF_POWER_TOGGLE_ACTION,
-    CONF_OSCILLATION_TOGGLE_ACTION,
-    CONF_SPEED_UP_ACTION,
-    CONF_SPEED_DOWN_ACTION,
+# The infrared transmitter is a Home Assistant `infrared` platform emitter
+# entity (domain `infrared`), the platform introduced in HA 2026.4 and used
+# by the built-in Dyson Infrared integration. Fan commands are sent as
+# genuine Dyson Cool protocol codes from the `infrared-protocols` library,
+# not free-text device/command pairs.
+CONF_INFRARED_EMITTER_ENTITY_ID: Final = "infrared_emitter_entity_id"
+
+# Each of the four relative commands this integration understands is backed
+# by one real Dyson Cool IR code (see infrared_protocols.codes.dyson.cool.
+# DysonCoolCode). The physical remote reuses the same code every time a
+# button is pressed, so each slot maps to exactly one code, chosen by the
+# user during setup.
+CONF_POWER_TOGGLE_CODE: Final = "power_toggle_code"
+CONF_OSCILLATION_TOGGLE_CODE: Final = "oscillation_toggle_code"
+CONF_SPEED_UP_CODE: Final = "speed_up_code"
+CONF_SPEED_DOWN_CODE: Final = "speed_down_code"
+
+COMMAND_CODE_KEYS: Final = (
+    CONF_POWER_TOGGLE_CODE,
+    CONF_OSCILLATION_TOGGLE_CODE,
+    CONF_SPEED_UP_CODE,
+    CONF_SPEED_DOWN_CODE,
 )
+
+# The optional feedback-burst helper is not part of the Dyson protocol; it
+# runs an arbitrary Home Assistant action (e.g. against a power meter), so it
+# keeps the generic action-sequence approach rather than a Dyson IR code.
+CONF_FEEDBACK_BURST_ACTION: Final = "feedback_burst_action"
 
 CONF_MAX_ATTEMPTS: Final = "max_attempts"
 CONF_IR_SEND_INTERVAL: Final = "ir_send_interval"

@@ -7,13 +7,23 @@
 
 ![Dyson Fan](assets/dyson_fan_repo_logo.png)
 
-Dyson Fan integrates the Dyson AM07 into Home Assistant with real, rapid feedback.
+Dyson Fan turns an infrared-controlled Dyson fan into a normal Home Assistant
+`fan` entity with real, rapid feedback. It uses a power sensor to confirm power,
+speed, and oscillation instead of assuming that an infrared command was received.
+
+Every fan command is transmitted through Home Assistant's native `infrared`
+platform as a genuine Dyson Cool protocol code (from the `infrared-protocols`
+library) to any `infrared` platform emitter entity, for example an ESPHome
+infrared proxy.
 
 ## Requirements
 
-- A smart plug dedicated to the fan that reports power readings.
-- An infrared blaster.
-- A Dyson AM07 fan.
+- A smart plug or other power sensor dedicated to the fan that reports power readings.
+- An `infrared` platform emitter entity able to transmit to the fan, such as an ESPHome infrared proxy.
+- A non-heating, 10-speed Dyson fan that uses the Dyson Cool infrared protocol (developed against the AM07).
+- `infrared-protocols` requires **Python 3.14+** on the host running Home Assistant.
+
+Readings above 100 W are treated as invalid. Dyson heater models are not supported.
 
 ## Installation
 
@@ -44,20 +54,23 @@ To add the integration, navigate to "Settings" > "Devices & services" > "Add int
 
 [![Add Dyson Fan to Home Assistant.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=dyson_fan)
 
-The power toggle, speed up, speed down, oscillation toggle, and feedback burst actions can each contain one or more Home Assistant action steps. For example, the following configuration sends a Broadlink IR command, assuming that the power toggle command was learned with the ID `power_toggle` for the device `dyson_tower_fan`:
+The setup flow asks for:
 
-```yaml
-action: remote.send_command
-target:
-  entity_id: remote.living_room
-data:
-  device: dyson_tower_fan
-  command: power_toggle
-```
+- the fan's power sensor;
+- the `infrared` platform emitter entity that transmits to the fan (e.g. `infrared.living_room_blaster`);
+- which Dyson Cool infrared code the power toggle should send;
+- which code the oscillation toggle should send (defaults to `SWING`);
+- which code speed up should send (defaults to `SPEED_UP`);
+- which code speed down should send (defaults to `SPEED_DOWN`);
+- an optional Home Assistant action used only to request faster power feedback.
 
-Each configured control action should send its corresponding IR command exactly once. The integration repeats the speed action when multiple steps are required. To change the power sensor or any configured action, select "Reconfigure" from the integration menu.
+The available codes are `ON`, `COOL_ON`, `OFF`, `SWING`, `SPEED_UP`, `SPEED_DOWN`, `TIME_UP`, and `TIME_DOWN`. Genuine Dyson remotes send separate `ON` and `OFF` codes rather than a single toggle, so for the power slot you may need to test which code your fan actually responds to. The integration always sends the same configured code whenever it wants to flip power and relies on the power sensor to confirm what happened.
 
 After setup, the fan entity becomes available once several power reports establish a stable state. While the fan is off, its speed cannot be observed from power readings, so the integration remembers the last known speed for the next power-on.
+
+To change the power sensor, infrared emitter, or any configured code, select "Reconfigure" from the integration menu.
+
+> **Upgrading from the remote-action version:** entries created with the four configurable actions cannot be converted automatically, because an infrared emitter has to be chosen. Such an entry reports that it needs reconfiguration; use "Reconfigure" to select the emitter and the Dyson Cool codes.
 
 ## Calibration
 
@@ -106,12 +119,18 @@ The integration calls the optional feedback burst action whenever it needs faste
 
 The best option is a smart plug that supports ESPHome or similarly customizable firmware. This gives you control over the reporting frequency and lets you implement features like feedback burst. An ESPHome configuration example is included at
 [`assets/esphome_power_burst.yaml`](assets/esphome_power_burst.yaml).
+The burst action is independent of the Dyson infrared codes; it targets the power meter, not the fan.
 
 The integration works without this action; feedback will simply take longer.
 
 ### Diagnostics Sensor
 
 If you encounter an issue, enable the `Diagnostics` sensor, which is disabled by default. The sensor exposes the requested, predicted, decoded, and confirmed states, along with the current power signature, attempts, timestamps, and last error.
+
+### Limitations
+
+- The power slot sends one fixed configured code every time, exactly like a single physical button; oscillation and speed codes are toggles/relative.
+- The configured `infrared` emitter entity must already be able to reach the fan; this integration does not do infrared learning or proxy setup.
 
 ## Feedback
 

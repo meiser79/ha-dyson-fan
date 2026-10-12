@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from infrared_protocols.codes.dyson.cool import DysonCoolCode
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.dyson_fan.calibration import (
@@ -21,13 +23,14 @@ from custom_components.dyson_fan.calibration import (
 )
 from custom_components.dyson_fan.const import (
     CONF_CALIBRATION_MODE,
+    CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
     CONF_MAX_ATTEMPTS,
-    CONF_OSCILLATION_TOGGLE_ACTION,
+    CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_SENSOR,
-    CONF_POWER_TOGGLE_ACTION,
-    CONF_SPEED_DOWN_ACTION,
-    CONF_SPEED_UP_ACTION,
+    CONF_POWER_TOGGLE_CODE,
+    CONF_SPEED_DOWN_CODE,
+    CONF_SPEED_UP_CODE,
     DOMAIN,
     EVENT_CALIBRATION_FINISHED,
     CalibrationMode,
@@ -46,10 +49,11 @@ def _entry(*, calibration_mode: CalibrationMode | None = None) -> MockConfigEntr
         unique_id="calibration-entry",
         data={
             CONF_POWER_SENSOR: "sensor.dyson_power",
-            CONF_POWER_TOGGLE_ACTION: [{"event": "dyson_test_power"}],
-            CONF_OSCILLATION_TOGGLE_ACTION: [{"event": "dyson_test_oscillation"}],
-            CONF_SPEED_UP_ACTION: [{"event": "dyson_test_speed_up"}],
-            CONF_SPEED_DOWN_ACTION: [{"event": "dyson_test_speed_down"}],
+            CONF_INFRARED_EMITTER_ENTITY_ID: "infrared.test_emitter",
+            CONF_POWER_TOGGLE_CODE: DysonCoolCode.ON.name,
+            CONF_OSCILLATION_TOGGLE_CODE: DysonCoolCode.SWING.name,
+            CONF_SPEED_UP_CODE: DysonCoolCode.SPEED_UP.name,
+            CONF_SPEED_DOWN_CODE: DysonCoolCode.SPEED_DOWN.name,
         },
         options={
             CONF_MAX_ATTEMPTS: 1,
@@ -146,7 +150,7 @@ async def test_endpoint_requires_two_unchanged_probe_batches(
 ) -> None:
     """An endpoint is accepted only after redundant IR commands change nothing."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller._async_calibration_send = AsyncMock()  # type: ignore[method-assign]
     controller._async_measure_stable_power = AsyncMock(  # type: ignore[method-assign]
@@ -163,7 +167,7 @@ async def test_endpoint_requires_two_unchanged_probe_batches(
 async def test_endpoint_that_keeps_moving_is_rejected(hass: HomeAssistant) -> None:
     """A likely dropped-IR sequence cannot be mistaken for a speed endpoint."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller._async_calibration_send = AsyncMock()  # type: ignore[method-assign]
     controller._async_measure_stable_power = AsyncMock(  # type: ignore[method-assign]
@@ -179,7 +183,7 @@ async def test_full_mode_measures_each_speed_without_extra_endpoint_commands(
 ) -> None:
     """Full mode sends one command per speed and keeps each measurement."""
     entry = _entry(calibration_mode=CalibrationMode.FULL)
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.supposed = FanState(True, 1, False)
     controller._async_calibration_send = AsyncMock()  # type: ignore[method-assign]
@@ -211,7 +215,7 @@ async def test_full_mode_measures_each_speed_without_extra_endpoint_commands(
 async def test_full_mode_rejects_a_missing_speed_step(hass: HomeAssistant) -> None:
     """A negligible power increase aborts rather than shifting later labels."""
     entry = _entry(calibration_mode=CalibrationMode.FULL)
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.supposed = FanState(True, 1, False)
     controller._async_calibration_send = AsyncMock()  # type: ignore[method-assign]
@@ -245,7 +249,7 @@ async def test_stable_measurement_adapts_to_fast_and_slow_reporters(
     from custom_components.dyson_fan import controller as controller_module
 
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller._source_valid = True
     controller._async_run_feedback_burst = AsyncMock()  # type: ignore[method-assign]
@@ -272,7 +276,7 @@ async def test_measurement_waits_for_delayed_power_increase(
 
     monkeypatch.setattr(module, "CALIBRATION_MEASUREMENT_SETTLE_SECONDS", 0)
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller._source_valid = True
     controller._async_run_feedback_burst = AsyncMock()
@@ -306,7 +310,7 @@ async def test_power_increase_that_never_arrives_times_out(
 
     monkeypatch.setattr(module, "CALIBRATION_MEASUREMENT_SETTLE_SECONDS", 0)
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller._source_valid = True
     controller._async_run_feedback_burst = AsyncMock()
@@ -317,17 +321,16 @@ async def test_power_increase_that_never_arrives_times_out(
         )
 
 
-async def test_failed_ir_is_failure_not_cancellation(hass: HomeAssistant) -> None:
+async def test_failed_ir_is_failure_not_cancellation(
+    hass: HomeAssistant, infrared_emitter: AsyncMock
+) -> None:
     """A transmitter exception preserves the error and attempts restoration."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.calibrating = True
     controller.supposed = FanState(True, 2, False)
-    controller._actions[Command.SPEED_UP] = AsyncMock()
-    controller._actions[Command.SPEED_UP].async_run.side_effect = RuntimeError(
-        "IR offline"
-    )
+    infrared_emitter.side_effect = HomeAssistantError("IR offline")
     controller._async_perform_calibration = lambda revision: (
         controller._async_calibration_send(Command.SPEED_UP, revision)
     )
@@ -350,7 +353,7 @@ async def test_calibration_completion_event_follows_restoration(
     """Automation sees one final result even with all diagnostic entities disabled."""
     entry = _entry()
     entry.add_to_hass(hass)
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.calibrating = True
     controller._async_perform_calibration = AsyncMock(
@@ -380,7 +383,7 @@ async def test_shutdown_during_restoration_emits_one_final_event(
     """Cancelling the background task must not leave automations waiting forever."""
     entry = _entry()
     entry.add_to_hass(hass)
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.calibrating = True
     controller._async_perform_calibration = AsyncMock(
@@ -413,7 +416,7 @@ async def test_restoration_uses_feedback_instead_of_failed_command_prediction(
 ) -> None:
     """An IR action can transmit and then raise, so its old prediction is unsafe."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.supposed = FanState(True, 5, False)
     controller._async_wait_for_feedback = AsyncMock(
@@ -437,7 +440,7 @@ async def test_calibration_uses_at_least_one_second_ir_interval(
     from custom_components.dyson_fan import controller as controller_module
 
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller._last_ir_sent_monotonic = 9.25
     controller._async_send_command = AsyncMock(  # type: ignore[method-assign]
@@ -459,7 +462,7 @@ async def test_calibration_measures_oscillation_then_power_cycles_again(
     from custom_components.dyson_fan import controller as controller_module
 
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.supposed = FanState(True, 5, True)
     controller._async_calibration_send = AsyncMock()  # type: ignore[method-assign]
@@ -493,7 +496,7 @@ async def test_failed_calibration_does_not_change_options(
 ) -> None:
     """A failed run restores state but leaves the configured table untouched."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     caplog.set_level(logging.INFO, logger="custom_components.dyson_fan.controller")
     original_table = controller.decoder.table.as_options()
     original_options = dict(entry.options)
@@ -526,7 +529,7 @@ async def test_successful_calibration_commits_whole_table_once(
     """Only a complete result atomically replaces the runtime and entry table."""
     entry = _entry()
     entry.add_to_hass(hass)
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     caplog.set_level(logging.INFO, logger="custom_components.dyson_fan.controller")
     original_table = controller.decoder.table.as_options()
     result = build_calibrated_table(1.5, 5.4, 57.54)

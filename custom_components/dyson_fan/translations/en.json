@@ -3,40 +3,49 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up power feedback and infrared actions",
-        "description": "Select a frequently updated power sensor and configure the four actions that control your fan. The fan entity remains unavailable until several stable power reports have been received.",
+        "title": "Set up power feedback and infrared commands",
+        "description": "Select a frequently updated power sensor, the infrared emitter entity that transmits to your fan, and which Dyson Cool infrared code each fan command should send. The fan entity remains unavailable until several stable power reports have been received.",
         "data": {
           "power_sensor": "Power sensor",
-          "power_toggle_action": "Power toggle action",
-          "oscillation_toggle_action": "Oscillation toggle action",
-          "speed_up_action": "Speed up action",
-          "speed_down_action": "Speed down action",
-          "feedback_burst_action": "Feedback burst action (optional)"
+          "infrared_emitter_entity_id": "Infrared emitter",
+          "power_toggle_code": "Power toggle: infrared code",
+          "oscillation_toggle_code": "Oscillation toggle: infrared code",
+          "speed_up_code": "Speed up: infrared code",
+          "speed_down_code": "Speed down: infrared code",
+          "feedback_burst_action": "Faster reporting action (optional)"
         },
         "data_description": {
-          "feedback_burst_action": "Runs before fresh power readings are requested; any Home Assistant action can be used."
+          "infrared_emitter_entity_id": "An `infrared` platform emitter entity, such as an ESPHome infrared proxy.",
+          "power_toggle_code": "The Dyson Cool code your fan's power button sends. Genuine Dyson remotes use separate ON/OFF codes rather than one toggle, so test which code this integration should use.",
+          "feedback_burst_action": "Any Home Assistant action run against your power meter to request a faster report. Leave empty to skip this optimization."
         }
       },
       "reconfigure": {
-        "title": "Reconfigure feedback and actions",
+        "title": "Reconfigure feedback and infrared commands",
         "data": {
           "power_sensor": "Power sensor",
-          "power_toggle_action": "Power toggle action",
-          "oscillation_toggle_action": "Oscillation toggle action",
-          "speed_up_action": "Speed up action",
-          "speed_down_action": "Speed down action",
-          "feedback_burst_action": "Feedback burst action (optional)"
+          "infrared_emitter_entity_id": "Infrared emitter",
+          "power_toggle_code": "Power toggle: infrared code",
+          "oscillation_toggle_code": "Oscillation toggle: infrared code",
+          "speed_up_code": "Speed up: infrared code",
+          "speed_down_code": "Speed down: infrared code",
+          "feedback_burst_action": "Faster reporting action (optional)"
         },
         "data_description": {
-          "feedback_burst_action": "Runs before fresh power readings are requested; any Home Assistant action can be used."
+          "infrared_emitter_entity_id": "An `infrared` platform emitter entity, such as an ESPHome infrared proxy.",
+          "power_toggle_code": "The Dyson Cool code your fan's power button sends. Genuine Dyson remotes use separate ON/OFF codes rather than one toggle, so test which code this integration should use.",
+          "feedback_burst_action": "Any Home Assistant action run against your power meter to request a faster report. Leave empty to skip this optimization."
         }
       }
     },
     "error": {
-      "invalid_action": "Select at least one valid Home Assistant action.",
+      "invalid_emitter": "Select a valid infrared emitter entity.",
+      "invalid_code": "Select a Dyson Cool infrared code for every required command.",
+      "invalid_action": "The feedback-burst action is not a valid Home Assistant action sequence.",
       "invalid_power_unit": "Use a power unit such as W or kW, or no unit (assumed W)."
     },
     "abort": {
+      "no_emitters": "No infrared emitter entities found. Set up an infrared transmitter (for example, an ESPHome infrared proxy) first.",
       "reconfigure_successful": "Dyson Fan was reconfigured successfully."
     }
   },
@@ -61,7 +70,7 @@
         },
         "data_description": {
           "max_attempts": "A complete initial command is one attempt. Additional attempts are only made after stable feedback does not match the target.",
-          "ir_send_interval": "Time between consecutive infrared action executions.",
+          "ir_send_interval": "Time between consecutive infrared command transmissions.",
           "calibration_mode": "Endpoints shifts and scales the current curve from speeds 1 and 10. Full measures every stationary speed."
         }
       },
@@ -94,6 +103,18 @@
       "options": {
         "endpoints": "Endpoints",
         "full": "Full"
+      }
+    },
+    "dyson_code": {
+      "options": {
+        "ON": "Power on",
+        "COOL_ON": "Power on (Cool mode)",
+        "OFF": "Power off",
+        "SWING": "Oscillation toggle",
+        "SPEED_UP": "Speed up",
+        "SPEED_DOWN": "Speed down",
+        "TIME_UP": "Timer up",
+        "TIME_DOWN": "Timer down"
       }
     }
   },

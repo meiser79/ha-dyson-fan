@@ -3,40 +3,49 @@
   "config": {
     "step": {
       "user": {
-        "title": "Leistungssensor und IR-Aktionen",
-        "description": "Einen häufig aktualisierten Leistungssensor auswählen und die vier Steueraktionen einrichten. Der Ventilator bleibt nicht verfügbar, bis mehrere stabile Messwerte vorliegen.",
+        "title": "Leistungssensor und IR-Befehle",
+        "description": "Einen häufig aktualisierten Leistungssensor, den Infrarot-Sender zum Ventilator und den Dyson-Cool-Code für jeden Befehl auswählen. Der Ventilator bleibt nicht verfügbar, bis mehrere stabile Messwerte vorliegen.",
         "data": {
           "power_sensor": "Leistungssensor",
-          "power_toggle_action": "Ein/Aus umschalten",
-          "oscillation_toggle_action": "Schwenken umschalten",
-          "speed_up_action": "Stufe erhöhen",
-          "speed_down_action": "Stufe senken",
+          "infrared_emitter_entity_id": "Infrarot-Sender",
+          "power_toggle_code": "Ein/Aus umschalten: IR-Code",
+          "oscillation_toggle_code": "Schwenken umschalten: IR-Code",
+          "speed_up_code": "Stufe erhöhen: IR-Code",
+          "speed_down_code": "Stufe senken: IR-Code",
           "feedback_burst_action": "Messrate erhöhen (optional)"
         },
         "data_description": {
-          "feedback_burst_action": "Wird vor dem Abruf neuer Messwerte ausgeführt. Jede Home Assistant-Aktion ist möglich."
+          "infrared_emitter_entity_id": "Eine Sender-Entität der `infrared`-Plattform, z. B. ein ESPHome-Infrarot-Proxy.",
+          "power_toggle_code": "Der Dyson-Cool-Code, den die Ein/Aus-Taste des Ventilators sendet. Original-Fernbedienungen verwenden getrennte EIN- und AUS-Codes statt eines Umschalters; es muss daher ausprobiert werden, welcher Code hier funktioniert.",
+          "feedback_burst_action": "Beliebige Home Assistant-Aktion am Leistungsmesser, die schnellere Messwerte anfordert. Leer lassen, um sie zu überspringen."
         }
       },
       "reconfigure": {
-        "title": "Sensor und Aktionen ändern",
+        "title": "Sensor, Sender und IR-Codes ändern",
         "data": {
           "power_sensor": "Leistungssensor",
-          "power_toggle_action": "Ein/Aus umschalten",
-          "oscillation_toggle_action": "Schwenken umschalten",
-          "speed_up_action": "Stufe erhöhen",
-          "speed_down_action": "Stufe senken",
+          "infrared_emitter_entity_id": "Infrarot-Sender",
+          "power_toggle_code": "Ein/Aus umschalten: IR-Code",
+          "oscillation_toggle_code": "Schwenken umschalten: IR-Code",
+          "speed_up_code": "Stufe erhöhen: IR-Code",
+          "speed_down_code": "Stufe senken: IR-Code",
           "feedback_burst_action": "Messrate erhöhen (optional)"
         },
         "data_description": {
-          "feedback_burst_action": "Wird vor dem Abruf neuer Messwerte ausgeführt. Jede Home Assistant-Aktion ist möglich."
+          "infrared_emitter_entity_id": "Eine Sender-Entität der `infrared`-Plattform, z. B. ein ESPHome-Infrarot-Proxy.",
+          "power_toggle_code": "Der Dyson-Cool-Code, den die Ein/Aus-Taste des Ventilators sendet. Original-Fernbedienungen verwenden getrennte EIN- und AUS-Codes statt eines Umschalters; es muss daher ausprobiert werden, welcher Code hier funktioniert.",
+          "feedback_burst_action": "Beliebige Home Assistant-Aktion am Leistungsmesser, die schnellere Messwerte anfordert. Leer lassen, um sie zu überspringen."
         }
       }
     },
     "error": {
-      "invalid_action": "Mindestens eine gültige Home Assistant-Aktion auswählen.",
+      "invalid_emitter": "Einen gültigen Infrarot-Sender auswählen.",
+      "invalid_code": "Für jeden Befehl einen Dyson-Cool-Infrarotcode auswählen.",
+      "invalid_action": "Die Messraten-Aktion ist keine gültige Home Assistant-Aktionsfolge.",
       "invalid_power_unit": "Eine Leistungseinheit wie W oder kW verwenden. Ohne Einheit gilt W."
     },
     "abort": {
+      "no_emitters": "Keine Infrarot-Sender gefunden. Zuerst einen Infrarot-Sender einrichten (z. B. einen ESPHome-Infrarot-Proxy).",
       "reconfigure_successful": "Dyson Ventilator wurde neu konfiguriert."
     }
   },
@@ -61,7 +70,7 @@
         },
         "data_description": {
           "max_attempts": "Die erste vollständige Befehlsfolge zählt als ein Versuch. Weitere Versuche erfolgen nur, wenn die stabile Rückmeldung vom Ziel abweicht.",
-          "ir_send_interval": "Zeit zwischen zwei IR-Aktionen.",
+          "ir_send_interval": "Zeit zwischen zwei IR-Sendungen.",
           "calibration_mode": "Endpunkte: Die aktuelle Kurve anhand der Stufen 1 und 10 verschieben und skalieren. Vollständig: Jede Stufe ohne Schwenken messen."
         }
       },
@@ -94,6 +103,18 @@
       "options": {
         "endpoints": "Endpunkte",
         "full": "Vollständig"
+      }
+    },
+    "dyson_code": {
+      "options": {
+        "ON": "Einschalten",
+        "COOL_ON": "Einschalten (Cool-Modus)",
+        "OFF": "Ausschalten",
+        "SWING": "Schwenken umschalten",
+        "SPEED_UP": "Stufe erhöhen",
+        "SPEED_DOWN": "Stufe senken",
+        "TIME_UP": "Timer erhöhen",
+        "TIME_DOWN": "Timer senken"
       }
     }
   },

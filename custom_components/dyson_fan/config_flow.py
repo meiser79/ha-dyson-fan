@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.components import infrared
+from homeassistant.components.infrared import DOMAIN as INFRARED_DOMAIN
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT
 from homeassistant.core import callback
@@ -25,21 +27,23 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+from infrared_protocols.codes.dyson.cool import DysonCoolCode
 
 from .const import (
-    ACTION_KEYS,
+    COMMAND_CODE_KEYS,
     CONF_CALIBRATION_MODE,
     CONF_FEEDBACK_BURST_ACTION,
+    CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
     CONF_MAX_ATTEMPTS,
-    CONF_OSCILLATION_TOGGLE_ACTION,
+    CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_OFF,
     CONF_POWER_OSCILLATION_DELTA,
     CONF_POWER_SENSOR,
-    CONF_POWER_TOGGLE_ACTION,
+    CONF_POWER_TOGGLE_CODE,
     CONF_RESTORE_DEFAULT_POWER_TABLE,
-    CONF_SPEED_DOWN_ACTION,
-    CONF_SPEED_UP_ACTION,
+    CONF_SPEED_DOWN_CODE,
+    CONF_SPEED_UP_CODE,
     DEFAULT_CALIBRATION_MODE,
     DEFAULT_IR_SEND_INTERVAL,
     DEFAULT_MAX_ATTEMPTS,
@@ -58,13 +62,44 @@ from .power import (
     power_to_watts,
 )
 
+_CODE_OPTIONS = [code.name for code in DysonCoolCode]
 
-def _configuration_schema(suggested: dict[str, Any] | None = None) -> vol.Schema:
+# Sensible defaults for the unambiguous slots; the power slot is left for the
+# user to choose since the real remote has separate ON/OFF/COOL_ON codes and
+# this integration can't tell which one your remote's power button sends.
+_DEFAULT_CODE: dict[str, str] = {
+    CONF_OSCILLATION_TOGGLE_CODE: DysonCoolCode.SWING.name,
+    CONF_SPEED_UP_CODE: DysonCoolCode.SPEED_UP.name,
+    CONF_SPEED_DOWN_CODE: DysonCoolCode.SPEED_DOWN.name,
+}
+
+
+def _code_selector() -> SelectSelector:
+    """Return a dropdown of the known Dyson Cool IR command codes."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=_CODE_OPTIONS,
+            translation_key="dyson_code",
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+def _configuration_schema(
+    emitter_entity_ids: list[str], suggested: dict[str, Any] | None = None
+) -> vol.Schema:
     """Build the setup/reconfigure schema with optional suggested values."""
     suggested = suggested or {}
 
-    def marker(key: str, *, optional: bool = False) -> vol.Marker:
-        description = {"suggested_value": suggested[key]} if key in suggested else None
+    def marker(
+        key: str, *, optional: bool = False, default: str | None = None
+    ) -> vol.Marker:
+        if key in suggested:
+            description = {"suggested_value": suggested[key]}
+        elif default is not None:
+            description = {"suggested_value": default}
+        else:
+            description = None
         marker_class = vol.Optional if optional else vol.Required
         return marker_class(key, description=description)
 
@@ -73,35 +108,49 @@ def _configuration_schema(suggested: dict[str, Any] | None = None) -> vol.Schema
             marker(CONF_POWER_SENSOR): EntitySelector(
                 EntitySelectorConfig(domain="sensor")
             ),
-            marker(CONF_POWER_TOGGLE_ACTION): ActionSelector(),
-            marker(CONF_OSCILLATION_TOGGLE_ACTION): ActionSelector(),
-            marker(CONF_SPEED_UP_ACTION): ActionSelector(),
-            marker(CONF_SPEED_DOWN_ACTION): ActionSelector(),
+            marker(CONF_INFRARED_EMITTER_ENTITY_ID): EntitySelector(
+                EntitySelectorConfig(
+                    domain=INFRARED_DOMAIN, include_entities=emitter_entity_ids
+                )
+            ),
+            marker(CONF_POWER_TOGGLE_CODE): _code_selector(),
+            marker(
+                CONF_OSCILLATION_TOGGLE_CODE,
+                default=_DEFAULT_CODE[CONF_OSCILLATION_TOGGLE_CODE],
+            ): _code_selector(),
+            marker(
+                CONF_SPEED_UP_CODE, default=_DEFAULT_CODE[CONF_SPEED_UP_CODE]
+            ): _code_selector(),
+            marker(
+                CONF_SPEED_DOWN_CODE, default=_DEFAULT_CODE[CONF_SPEED_DOWN_CODE]
+            ): _code_selector(),
             marker(CONF_FEEDBACK_BURST_ACTION, optional=True): ActionSelector(),
         }
     )
 
 
-async def _async_validate_actions(
+async def _async_validate_input(
     hass: Any, user_input: dict[str, Any]
 ) -> dict[str, str]:
-    """Validate every user-selected HA action sequence."""
+    """Validate the infrared emitter, the four codes, and the burst action."""
     errors: dict[str, str] = {}
     if state := hass.states.get(user_input[CONF_POWER_SENSOR]):
         try:
             power_to_watts(0, state.attributes.get(ATTR_UNIT_OF_MEASUREMENT))
         except InvalidPowerReading:
             errors[CONF_POWER_SENSOR] = "invalid_power_unit"
-    for key in ACTION_KEYS:
+
+    emitter_entity_id = user_input.get(CONF_INFRARED_EMITTER_ENTITY_ID)
+    if not emitter_entity_id or emitter_entity_id not in infrared.async_get_emitters(
+        hass
+    ):
+        errors[CONF_INFRARED_EMITTER_ENTITY_ID] = "invalid_emitter"
+
+    for key in COMMAND_CODE_KEYS:
         value = user_input.get(key)
-        sequence = [value] if isinstance(value, dict) else value
-        if not isinstance(sequence, list) or not sequence:
-            errors[key] = "invalid_action"
-            continue
-        try:
-            await async_validate_actions_config(hass, deepcopy(sequence))
-        except HomeAssistantError, ValueError, vol.Invalid:
-            errors[key] = "invalid_action"
+        if value not in _CODE_OPTIONS:
+            errors[key] = "invalid_code"
+
     if value := user_input.get(CONF_FEEDBACK_BURST_ACTION):
         sequence = [value] if isinstance(value, dict) else value
         if not isinstance(sequence, list) or not sequence:
@@ -122,10 +171,14 @@ class DysonFanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Set up a fan from a power sensor and four HA actions."""
+        """Set up a fan from a power sensor and an infrared emitter."""
+        emitter_entity_ids = infrared.async_get_emitters(self.hass)
+        if not emitter_entity_ids:
+            return self.async_abort(reason="no_emitters")
+
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = await _async_validate_actions(self.hass, user_input)
+            errors = await _async_validate_input(self.hass, user_input)
             if not errors:
                 await self.async_set_unique_id(uuid4().hex)
                 return self.async_create_entry(
@@ -140,18 +193,22 @@ class DysonFanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=_configuration_schema(),
+            data_schema=_configuration_schema(emitter_entity_ids),
             errors=errors,
         )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Change the power sensor and Home Assistant actions."""
+        """Change the power sensor, infrared emitter, and command codes."""
         entry = self._get_reconfigure_entry()
+        emitter_entity_ids = infrared.async_get_emitters(self.hass)
+        if not emitter_entity_ids:
+            return self.async_abort(reason="no_emitters")
+
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = await _async_validate_actions(self.hass, user_input)
+            errors = await _async_validate_input(self.hass, user_input)
             if not errors:
                 await self.async_set_unique_id(entry.unique_id)
                 self._abort_if_unique_id_mismatch()
@@ -159,7 +216,7 @@ class DysonFanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=_configuration_schema(dict(entry.data)),
+            data_schema=_configuration_schema(emitter_entity_ids, dict(entry.data)),
             errors=errors,
         )
 

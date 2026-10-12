@@ -12,22 +12,25 @@ from homeassistant.const import STATE_OFF, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.helpers import entity_registry as er
+from infrared_protocols.codes.dyson.cool import DysonCoolCode
 from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_component
 
 from custom_components.dyson_fan import async_migrate_entry
+from custom_components.dyson_fan.config_flow import _async_validate_input
 from custom_components.dyson_fan.const import (
     CONF_CALIBRATION_MODE,
     CONF_FEEDBACK_BURST_ACTION,
+    CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
     CONF_MAX_ATTEMPTS,
-    CONF_OSCILLATION_TOGGLE_ACTION,
+    CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_OFF,
     CONF_POWER_OSCILLATION_DELTA,
     CONF_POWER_SENSOR,
-    CONF_POWER_TOGGLE_ACTION,
+    CONF_POWER_TOGGLE_CODE,
     CONF_RESTORE_DEFAULT_POWER_TABLE,
-    CONF_SPEED_DOWN_ACTION,
-    CONF_SPEED_UP_ACTION,
+    CONF_SPEED_DOWN_CODE,
+    CONF_SPEED_UP_CODE,
     DOMAIN,
     CalibrationMode,
     power_signature_key,
@@ -40,25 +43,27 @@ def mock_frontend(hass: HomeAssistant) -> None:
     """Keep flow tests independent of the optional frontend distribution."""
     mock_component(hass, "frontend")
     mock_component(hass, "http")
+    mock_component(hass, "infrared")
     hass.http = Mock()
     hass.http.async_register_static_paths = AsyncMock()
     hass.data[DATA_EXTRA_MODULE_URL] = set()
 
 
 def _valid_input() -> dict[str, object]:
-    """Return four valid no-op-style event actions."""
+    """Return a valid emitter selection and one Dyson Cool code per command."""
     return {
         CONF_POWER_SENSOR: "sensor.dyson_power",
-        CONF_POWER_TOGGLE_ACTION: [{"event": "dyson_test_power"}],
-        CONF_OSCILLATION_TOGGLE_ACTION: [{"event": "dyson_test_oscillation"}],
-        CONF_SPEED_UP_ACTION: [{"event": "dyson_test_speed_up"}],
-        CONF_SPEED_DOWN_ACTION: [{"event": "dyson_test_speed_down"}],
+        CONF_INFRARED_EMITTER_ENTITY_ID: "infrared.test_emitter",
+        CONF_POWER_TOGGLE_CODE: DysonCoolCode.ON.name,
+        CONF_OSCILLATION_TOGGLE_CODE: DysonCoolCode.SWING.name,
+        CONF_SPEED_UP_CODE: DysonCoolCode.SPEED_UP.name,
+        CONF_SPEED_DOWN_CODE: DysonCoolCode.SPEED_DOWN.name,
     }
 
 
 @pytest.mark.parametrize("unit", ["W", None, ""])
 async def test_user_flow(hass: HomeAssistant, unit: str | None) -> None:
-    """A power sensor and four actions create a config entry."""
+    """A power sensor, an infrared emitter and four codes create a config entry."""
     attributes = {} if unit is None else {"unit_of_measurement": unit}
     hass.states.async_set("sensor.dyson_power", "1.2", attributes)
     result = await hass.config_entries.flow.async_init(
@@ -101,18 +106,34 @@ async def test_user_flow(hass: HomeAssistant, unit: str | None) -> None:
     hass.http.async_register_static_paths.assert_awaited_once()
 
 
-async def test_empty_action_is_rejected(hass: HomeAssistant) -> None:
-    """The flow reports the specific invalid action instead of creating an entry."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    user_input = _valid_input()
-    user_input[CONF_SPEED_UP_ACTION] = []
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input
-    )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {CONF_SPEED_UP_ACTION: "invalid_action"}
+async def test_unknown_code_is_rejected(hass: HomeAssistant) -> None:
+    """A code outside the Dyson Cool set is reported against its own field."""
+    user_input = {**_valid_input(), CONF_SPEED_UP_CODE: "NOT_A_CODE"}
+
+    errors = await _async_validate_input(hass, user_input)
+
+    assert errors == {CONF_SPEED_UP_CODE: "invalid_code"}
+
+
+async def test_unavailable_emitter_is_rejected(hass: HomeAssistant) -> None:
+    """Only emitters the infrared platform currently offers can be selected."""
+    user_input = {**_valid_input(), CONF_INFRARED_EMITTER_ENTITY_ID: "infrared.other"}
+
+    errors = await _async_validate_input(hass, user_input)
+
+    assert errors == {CONF_INFRARED_EMITTER_ENTITY_ID: "invalid_emitter"}
+
+
+@pytest.mark.parametrize("burst", ["not an action", [{"not_an_action": 1}]])
+async def test_invalid_burst_action_is_rejected(
+    hass: HomeAssistant, burst: object
+) -> None:
+    """The optional burst action must still be a valid action sequence."""
+    user_input = {**_valid_input(), CONF_FEEDBACK_BURST_ACTION: burst}
+
+    errors = await _async_validate_input(hass, user_input)
+
+    assert errors == {CONF_FEEDBACK_BURST_ACTION: "invalid_action"}
 
 
 async def test_energy_sensor_is_rejected(hass: HomeAssistant) -> None:
@@ -324,7 +345,7 @@ async def test_legacy_power_table_migrates_to_shared_oscillation_delta(
 
 
 async def test_reconfigure_flow(hass: HomeAssistant) -> None:
-    """The sensor and all four actions can be replaced without deleting the fan."""
+    """The sensor, emitter and codes can be replaced without deleting the fan."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )

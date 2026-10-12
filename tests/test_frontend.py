@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from infrared_protocols.codes.dyson.cool import DysonCoolCode
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.dyson_fan import (
@@ -13,7 +14,15 @@ from custom_components.dyson_fan import (
     async_setup,
     async_setup_entry,
 )
-from custom_components.dyson_fan.const import ACTION_KEYS, CONF_POWER_SENSOR, DOMAIN
+from custom_components.dyson_fan.const import (
+    CONF_INFRARED_EMITTER_ENTITY_ID,
+    CONF_OSCILLATION_TOGGLE_CODE,
+    CONF_POWER_SENSOR,
+    CONF_POWER_TOGGLE_CODE,
+    CONF_SPEED_DOWN_CODE,
+    CONF_SPEED_UP_CODE,
+    DOMAIN,
+)
 from custom_components.dyson_fan.fan import DysonFeedbackFan
 from custom_components.dyson_fan.models import Command
 
@@ -69,7 +78,11 @@ async def test_icon_failure_falls_back_without_blocking_control(
         domain=DOMAIN,
         data={
             CONF_POWER_SENSOR: "sensor.dyson_power",
-            **{key: [{"event": "dyson_test_action"}] for key in ACTION_KEYS},
+            CONF_INFRARED_EMITTER_ENTITY_ID: "infrared.test_emitter",
+            CONF_POWER_TOGGLE_CODE: DysonCoolCode.ON.name,
+            CONF_OSCILLATION_TOGGLE_CODE: DysonCoolCode.SWING.name,
+            CONF_SPEED_UP_CODE: DysonCoolCode.SPEED_UP.name,
+            CONF_SPEED_DOWN_CODE: DysonCoolCode.SPEED_DOWN.name,
         },
     )
     entry.add_to_hass(hass)

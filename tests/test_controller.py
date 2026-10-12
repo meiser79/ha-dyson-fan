@@ -9,24 +9,33 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from homeassistant.core import Context, HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from infrared_protocols.codes.dyson.cool import DysonCoolCode
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.dyson_fan.const import (
     CONF_FEEDBACK_BURST_ACTION,
+    CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
     CONF_MAX_ATTEMPTS,
-    CONF_OSCILLATION_TOGGLE_ACTION,
+    CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_SENSOR,
-    CONF_POWER_TOGGLE_ACTION,
-    CONF_SPEED_DOWN_ACTION,
-    CONF_SPEED_UP_ACTION,
+    CONF_POWER_TOGGLE_CODE,
+    CONF_SPEED_DOWN_CODE,
+    CONF_SPEED_UP_CODE,
     DOMAIN,
 )
 from custom_components.dyson_fan.controller import DysonFanController, _ActionLogger
 from custom_components.dyson_fan.models import Command, FanState, TargetState
 
+EMITTER_ENTITY_ID = "infrared.test_emitter"
 
-def _entry() -> MockConfigEntry:
+
+def _sent(send: AsyncMock) -> list[DysonCoolCode]:
+    """Return the Dyson Cool codes transmitted so far, in order."""
+    return [DysonCoolCode(call.args[2].code) for call in send.await_args_list]
+
+
+def _entry(extra_data: dict[str, object] | None = None) -> MockConfigEntry:
     """Return a controller-ready config entry."""
     return MockConfigEntry(
         domain=DOMAIN,
@@ -35,10 +44,12 @@ def _entry() -> MockConfigEntry:
         unique_id="test-entry",
         data={
             CONF_POWER_SENSOR: "sensor.dyson_power",
-            CONF_POWER_TOGGLE_ACTION: [{"event": "dyson_test_power"}],
-            CONF_OSCILLATION_TOGGLE_ACTION: [{"event": "dyson_test_oscillation"}],
-            CONF_SPEED_UP_ACTION: [{"event": "dyson_test_speed_up"}],
-            CONF_SPEED_DOWN_ACTION: [{"event": "dyson_test_speed_down"}],
+            CONF_INFRARED_EMITTER_ENTITY_ID: EMITTER_ENTITY_ID,
+            CONF_POWER_TOGGLE_CODE: DysonCoolCode.ON.name,
+            CONF_OSCILLATION_TOGGLE_CODE: DysonCoolCode.SWING.name,
+            CONF_SPEED_UP_CODE: DysonCoolCode.SPEED_UP.name,
+            CONF_SPEED_DOWN_CODE: DysonCoolCode.SPEED_DOWN.name,
+            **(extra_data or {}),
         },
         options={CONF_MAX_ATTEMPTS: 1, CONF_IR_SEND_INTERVAL: 0},
     )
@@ -50,7 +61,7 @@ async def test_invalid_feedback_logs_once_per_category_and_recovers(
     """Changing invalid watts and repeated good samples must not flood logs."""
     caplog.set_level(logging.DEBUG, logger="custom_components.dyson_fan")
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     for watts in range(101, 151):
         controller._async_process_power_state(
             State(controller.power_sensor, str(watts), {"unit_of_measurement": "W"})
@@ -74,7 +85,7 @@ async def test_control_failure_logs_one_warning_after_attempts(
 ) -> None:
     """Timeouts and exhausted mismatch retries have one actionable summary."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.max_attempts = 3
     controller.target_revision = 1
     controller.target = TargetState(True, 7, False)
@@ -94,15 +105,15 @@ async def test_control_failure_logs_one_warning_after_attempts(
 async def test_script_logging_is_scoped_and_quiet_at_info(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """IR script chatter is visible under integration DEBUG, not INFO."""
-    entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    """Burst-script chatter is visible under integration DEBUG, not INFO."""
+    entry = _entry({CONF_FEEDBACK_BURST_ACTION: [{"event": "dyson_feedback_burst"}]})
+    controller = DysonFanController(hass, entry)
     await controller.async_start()
     caplog.set_level(logging.INFO)
-    assert await controller._async_send_command(Command.SPEED_UP, 0)
+    await controller._async_run_feedback_burst()
     assert not caplog.records
     caplog.set_level(logging.DEBUG, logger="custom_components.dyson_fan")
-    assert await controller._async_send_command(Command.SPEED_UP, 0)
+    await controller._async_run_feedback_burst()
     script_records = [
         r for r in caplog.records if "Running dyson_fan script" in r.message
     ]
@@ -128,19 +139,15 @@ def test_action_logger_preserves_unexpected_tracebacks(
     assert caplog.records[1].exc_info is not None
 
 
-async def test_action_retries_do_not_duplicate_warning_logs(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+async def test_ir_retries_do_not_duplicate_warning_logs(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    infrared_emitter: AsyncMock,
 ) -> None:
-    """A real HA script failure on each retry has just one final warning."""
-
-    def fail(call):
-        raise HomeAssistantError("IR transmitter offline")
-
-    hass.services.async_register("dyson_test", "fail", fail)
+    """An emitter failure on each retry produces just one final warning."""
+    infrared_emitter.side_effect = HomeAssistantError("IR transmitter offline")
     entry = _entry()
-    data = dict(entry.data)
-    data[CONF_SPEED_UP_ACTION] = [{"action": "dyson_test.fail"}]
-    controller = DysonFanController(hass, entry, data)
+    controller = DysonFanController(hass, entry)
     await controller.async_start()
     controller.max_attempts = 3
     controller.target_revision = 1
@@ -160,11 +167,9 @@ async def test_action_retries_do_not_duplicate_warning_logs(
 
 async def test_feedback_burst_runs_generic_action(hass: HomeAssistant) -> None:
     """Feedback acceleration accepts an arbitrary Home Assistant action."""
-    entry = _entry()
-    data = dict(entry.data)
-    data[CONF_FEEDBACK_BURST_ACTION] = [{"event": "dyson_feedback_burst"}]
+    entry = _entry({CONF_FEEDBACK_BURST_ACTION: [{"event": "dyson_feedback_burst"}]})
     entry.add_to_hass(hass)
-    controller = DysonFanController(hass, entry, data)
+    controller = DysonFanController(hass, entry)
     events: list[object] = []
     hass.bus.async_listen("dyson_feedback_burst", events.append)
 
@@ -179,11 +184,9 @@ async def test_feedback_burst_runs_generic_action(hass: HomeAssistant) -> None:
 async def test_invalid_burst_is_rejected_before_scripts_are_created(
     hass: HomeAssistant,
 ) -> None:
-    """A malformed optional action must not leave the four IR scripts behind."""
-    entry = _entry()
-    data = dict(entry.data)
-    data[CONF_FEEDBACK_BURST_ACTION] = "invalid action"
-    controller = DysonFanController(hass, entry, data)
+    """A malformed optional action must not leave a script behind."""
+    entry = _entry({CONF_FEEDBACK_BURST_ACTION: "invalid action"})
+    controller = DysonFanController(hass, entry)
     controller._store.async_save = AsyncMock()
     with patch("custom_components.dyson_fan.controller.Script") as script:
         with pytest.raises(ValueError, match="not a Home Assistant action"):
@@ -195,15 +198,15 @@ async def test_invalid_burst_is_rejected_before_scripts_are_created(
 @pytest.mark.parametrize(
     "error", [RuntimeError("setup failed"), asyncio.CancelledError()]
 )
-async def test_partial_startup_cleans_scripts_and_listeners_without_saving(
+async def test_partial_startup_cleans_script_and_listeners_without_saving(
     hass: HomeAssistant, error: BaseException
 ) -> None:
     """Failed/cancelled setup releases allocated resources, preserving storage."""
-    entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    entry = _entry({CONF_FEEDBACK_BURST_ACTION: [{"event": "dyson_feedback_burst"}]})
+    controller = DysonFanController(hass, entry)
     controller._store.async_load = AsyncMock(return_value={"last_speed": 7})
     controller._store.async_save = AsyncMock()
-    scripts = [Mock(async_unload=AsyncMock()) for _ in range(4)]
+    scripts = [Mock(async_unload=AsyncMock())]
     unsubscribe = Mock()
     with (
         patch("custom_components.dyson_fan.controller.Script", side_effect=scripts),
@@ -222,7 +225,7 @@ async def test_partial_startup_cleans_scripts_and_listeners_without_saving(
     unsubscribe.assert_called_once()
     for script in scripts:
         script.async_unload.assert_awaited_once()
-    assert not controller._actions
+    assert controller._feedback_burst_action is None
     assert not controller._unsubscribers
     assert controller.last_speed == 7
     controller._store.async_save.assert_not_called()
@@ -237,7 +240,7 @@ async def test_burst_wait_is_bounded_and_cancellable(
 
     monkeypatch.setattr(module, "FEEDBACK_BURST_TIMEOUT_SECONDS", 0.02)
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     entered = asyncio.Event()
     stopped = asyncio.Event()
 
@@ -265,7 +268,7 @@ async def test_feedback_normalizes_units_before_decoding(
 ) -> None:
     """Both meter directions work; absent units mean W, not an invalid sensor."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     reading = sign * (0.0522 if unit == "kW" else 52.2)
     attributes = {} if unit is None else {"unit_of_measurement": unit}
     for _ in range(3):
@@ -292,7 +295,7 @@ async def test_feedback_window_uses_actual_cadence(
 
     monkeypatch.setattr(module, "POST_COMMAND_SETTLE_SECONDS", 0)
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.during_attempt = True
     controller._async_run_feedback_burst = AsyncMock()
@@ -325,24 +328,21 @@ async def test_feedback_window_uses_actual_cadence(
     assert max(deadlines) == pytest.approx(35 if interval == 10 else 15, abs=0.1)
 
 
-async def test_failed_action_does_not_advance_predicted_state(
-    hass: HomeAssistant,
+async def test_failed_ir_does_not_advance_predicted_state(
+    hass: HomeAssistant, infrared_emitter: AsyncMock
 ) -> None:
-    """A known action failure remains unsent so feedback recovery can retry it."""
+    """A known transmit failure remains unsent so feedback recovery can retry it."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.target = TargetState(True, 2, False)
     controller.supposed = FanState(True, 1, False)
     controller._async_run_feedback_burst = AsyncMock()  # type: ignore[method-assign]
-    controller._actions[Command.SPEED_UP] = AsyncMock()
-    controller._actions[Command.SPEED_UP].async_run.side_effect = HomeAssistantError(
-        "transmitter unavailable"
-    )
+    infrared_emitter.side_effect = HomeAssistantError("transmitter unavailable")
 
     assert not await controller._async_execute_target(1)
     assert controller.supposed == FanState(True, 1, False)
-    assert controller.last_error == "action_error: transmitter unavailable"
+    assert controller.last_error == "infrared_error: transmitter unavailable"
 
 
 async def test_oscillation_precedes_multi_step_speed_change(
@@ -350,7 +350,7 @@ async def test_oscillation_precedes_multi_step_speed_change(
 ) -> None:
     """An already-on fan corrects oscillation before slow speed commands."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.target = TargetState(True, 5, True)
     controller.supposed = FanState(True, 1, False)
@@ -379,7 +379,7 @@ async def test_power_off_stops_oscillation_before_toggle(
 ) -> None:
     """Normal shutdown stops oscillation before power and retains the speed."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.target = TargetState(False, 7, False)
     controller.supposed = FanState(True, 7, True)
@@ -402,7 +402,7 @@ async def test_power_off_stops_oscillation_before_toggle(
 async def test_new_revision_stops_old_speed_sequence(hass: HomeAssistant) -> None:
     """A newer target supersedes a long relative speed sequence at a command edge."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.target = TargetState(True, 10, False)
     controller.supposed = FanState(True, 1, False)
@@ -422,28 +422,25 @@ async def test_new_revision_stops_old_speed_sequence(hass: HomeAssistant) -> Non
     assert sent == [Command.SPEED_UP]
 
 
-async def test_target_changed_during_action_keeps_transmitted_step(
-    hass: HomeAssistant,
+async def test_target_changed_during_send_keeps_transmitted_step(
+    hass: HomeAssistant, infrared_emitter: AsyncMock
 ) -> None:
     """A command already in flight still advances supposed state before replanning."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.target_revision = 1
     controller.target = TargetState(True, 3, False)
     controller.supposed = FanState(True, 1, False)
     controller._async_run_feedback_burst = AsyncMock()  # type: ignore[method-assign]
 
-    action = AsyncMock()
-
     async def change_target(*args: object, **kwargs: object) -> None:
         controller.target_revision = 2
         controller.target = TargetState(False, 1, False)
 
-    action.async_run.side_effect = change_target
-    controller._actions[Command.SPEED_UP] = action
+    infrared_emitter.side_effect = change_target
 
     assert not await controller._async_execute_target(1)
-    assert action.async_run.await_count == 1
+    assert _sent(infrared_emitter) == [DysonCoolCode.SPEED_UP]
     assert controller.supposed == FanState(True, 2, False)
 
 
@@ -455,14 +452,14 @@ async def test_last_feedback_speed_survives_controller_restart(
     entry.add_to_hass(hass)
     hass.states.async_set("sensor.dyson_power", "18.2", {"unit_of_measurement": "W"})
 
-    first = DysonFanController(hass, entry, entry.data)
+    first = DysonFanController(hass, entry)
     await first.async_start()
     hass.states.async_set("sensor.dyson_power", "18.2", {"unit_of_measurement": "W"})
     hass.states.async_set("sensor.dyson_power", "18.2", {"unit_of_measurement": "W"})
     assert first.last_speed == 5
     await first.async_shutdown()
 
-    second = DysonFanController(hass, entry, entry.data)
+    second = DysonFanController(hass, entry)
     await second.async_start()
     assert second.last_speed == 5
     await second.async_shutdown()
@@ -473,7 +470,7 @@ async def test_already_confirmed_target_completes_without_action(
 ) -> None:
     """A no-op service request does not wait for unnecessary fresh feedback."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     state = FanState(False, 4, False)
     controller.accepted = state
     controller.supposed = state
@@ -491,7 +488,7 @@ async def test_partial_request_after_failure_uses_confirmed_state(
 ) -> None:
     """A handled failed target cannot make oscillate turn an actually-off fan on."""
     entry = _entry()
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     controller.accepted = FanState(False, 4, False)
     controller.supposed = FanState(False, 4, False)
     controller.target = TargetState(True, 8, False)
@@ -505,7 +502,7 @@ async def test_partial_request_after_failure_uses_confirmed_state(
 
 
 async def test_first_power_on_learns_unknown_speed_and_converges(
-    hass: HomeAssistant, monkeypatch: object
+    hass: HomeAssistant, monkeypatch: object, infrared_emitter: AsyncMock
 ) -> None:
     """A first install can learn hardware speed without an initial-speed option."""
     from custom_components.dyson_fan import controller as controller_module
@@ -516,24 +513,20 @@ async def test_first_power_on_learns_unknown_speed_and_converges(
     entry = _entry()
     entry.add_to_hass(hass)
     hass.states.async_set("sensor.dyson_power", "1.2", {"unit_of_measurement": "W"})
-    controller = DysonFanController(hass, entry, entry.data)
+    controller = DysonFanController(hass, entry)
     await controller.async_start()
     hass.states.async_set("sensor.dyson_power", "1.2", {"unit_of_measurement": "W"})
     hass.states.async_set("sensor.dyson_power", "1.2", {"unit_of_measurement": "W"})
     assert controller.accepted == FanState(False, None, False)
 
-    commands: list[str] = []
-    hass.bus.async_listen("dyson_test_power", lambda event: commands.append("power"))
-    hass.bus.async_listen(
-        "dyson_test_oscillation", lambda event: commands.append("oscillation")
-    )
+    expected = [DysonCoolCode.ON, DysonCoolCode.SWING]
 
     controller._async_set_target(TargetState(True, 4, True), Context())
     for _ in range(100):
-        if commands == ["power", "oscillation"]:
+        if _sent(infrared_emitter) == expected:
             break
         await asyncio.sleep(0)
-    assert commands == ["power", "oscillation"]
+    assert _sent(infrared_emitter) == expected
     for _ in range(100):
         if controller.phase == "waiting_feedback" and controller._samples_enabled:
             break
