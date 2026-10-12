@@ -21,7 +21,7 @@ The public entity consumed by UI, HomeKit, and automations is a template fan:
 
 - `fan.dyson_tower_fan`
 - Display name in UI: `Dyson 落地扇`
-- Template source: [configuration.yaml](/home/myhades/Documents/GitHub/ha-config/configuration.yaml:255)
+- Template source: [configuration.yaml](/home/meiser79/Documents/GitHub/ha-config/configuration.yaml:255)
 - It exposes:
   - power from `input_boolean.dyson_power`
   - percentage from `input_number.dyson_speed * 10`
@@ -94,7 +94,7 @@ Readback:
 
 Power plug configuration:
 
-- ESPHome source: [esphome/iot-plug-dyson.yaml](/home/myhades/Documents/GitHub/ha-config/esphome/iot-plug-dyson.yaml:1)
+- ESPHome source: [esphome/iot-plug-dyson.yaml](/home/meiser79/Documents/GitHub/ha-config/esphome/iot-plug-dyson.yaml:1)
 - ESPHome node name: `iot-plug-dyson`
 - Friendly name: `Dyson Fan Plug`
 - Role in this system: power-measurement feedback plug for the Dyson fan.
@@ -185,7 +185,7 @@ Offline UI also watches:
 
 ## Power Reading Decoder
 
-Implemented by script `{Dyson} Read`, source: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:736).
+Implemented by script `{Dyson} Read`, source: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:736).
 
 Input:
 
@@ -226,7 +226,7 @@ It then updates the I/O helper attributes:
 
 ## IR Command Script
 
-Implemented by script `{Dyson} Send Command`, source: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:768).
+Implemented by script `{Dyson} Send Command`, source: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:768).
 
 Mode:
 
@@ -279,7 +279,7 @@ Execution order:
 
 ## State Machine Automation
 
-Implemented by automation `[Device] Living Room - Dyson Tower Fan`, source: [automations.yaml](/home/myhades/Documents/GitHub/ha-config/automations.yaml:3593).
+Implemented by automation `[Device] Living Room - Dyson Tower Fan`, source: [automations.yaml](/home/meiser79/Documents/GitHub/ha-config/automations.yaml:3593).
 
 Mode:
 
@@ -423,7 +423,7 @@ Notice that speed is not overwritten from `read_speed` in the off path. This pre
 
 Living room page uses the public template fan:
 
-- source: [dashboards/main.yaml](/home/myhades/Documents/GitHub/ha-config/dashboards/main.yaml:1806)
+- source: [dashboards/main.yaml](/home/meiser79/Documents/GitHub/ha-config/dashboards/main.yaml:1806)
 - card template: `std_fan`
 - entity: `fan.dyson_tower_fan`
 - name: `Dyson 落地扇`
@@ -431,21 +431,21 @@ Living room page uses the public template fan:
 
 More/offline page includes the plug tracker:
 
-- source: [dashboards/main.yaml](/home/myhades/Documents/GitHub/ha-config/dashboards/main.yaml:5615)
+- source: [dashboards/main.yaml](/home/meiser79/Documents/GitHub/ha-config/dashboards/main.yaml:5615)
 - `device_tracker.dyson_fan_plug`
 
 ### HomeKit
 
 The template fan is exposed through HomeKit:
 
-- source: [configuration.yaml](/home/myhades/Documents/GitHub/ha-config/configuration.yaml:183)
+- source: [configuration.yaml](/home/meiser79/Documents/GitHub/ha-config/configuration.yaml:183)
 - included entity: `fan.dyson_tower_fan`
 
 ### Living/Dining Automatic Adjust
 
 Script `living_dining_room_automatic_adjust` can turn on the Dyson when the living room is hot or the living-room AC is cooling:
 
-- source: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:565)
+- source: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:565)
 - if living-room average temperature is above `26`, or AC state is `cool`:
   - turn on `fan.dyson_tower_fan`
   - set percentage based on temperature:
@@ -465,7 +465,7 @@ Its wait logic also includes `fan.dyson_tower_fan` when the room is hot.
 
 Script `frontend_a_c_recommendation` can turn the Dyson on when recommending cooling:
 
-- source: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:641)
+- source: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:641)
 - if living-room average temperature is above `29`:
   - turn on living-room AC
   - set cool/25 C/auto fan
@@ -478,7 +478,7 @@ Script `frontend_a_c_recommendation` can turn the Dyson on when recommending coo
 
 The generic living-room leaving routine includes the Dyson as a generic entity:
 
-- source: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:900)
+- source: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:900)
 - `fan.dyson_tower_fan` is turned off as part of living-room generic devices.
 
 ## Important Semantics To Preserve
@@ -571,14 +571,14 @@ The integration should ideally expose diagnostic attributes for debugging, but t
 
 ## Current Source Index
 
-- Dyson power plug ESPHome config: [esphome/iot-plug-dyson.yaml](/home/myhades/Documents/GitHub/ha-config/esphome/iot-plug-dyson.yaml:1)
-- Template fan: [configuration.yaml](/home/myhades/Documents/GitHub/ha-config/configuration.yaml:255)
-- HomeKit include: [configuration.yaml](/home/myhades/Documents/GitHub/ha-config/configuration.yaml:183)
-- Dyson state machine automation: [automations.yaml](/home/myhades/Documents/GitHub/ha-config/automations.yaml:3593)
-- Readback decoder script: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:736)
-- IR command script: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:768)
-- Living/dining automatic adjust consumer: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:565)
-- A/C recommendation consumer: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:641)
-- Leaving-system consumer: [scripts.yaml](/home/myhades/Documents/GitHub/ha-config/scripts.yaml:900)
-- Living-room UI card: [dashboards/main.yaml](/home/myhades/Documents/GitHub/ha-config/dashboards/main.yaml:1806)
-- Offline UI entry: [dashboards/main.yaml](/home/myhades/Documents/GitHub/ha-config/dashboards/main.yaml:5615)
+- Dyson power plug ESPHome config: [esphome/iot-plug-dyson.yaml](/home/meiser79/Documents/GitHub/ha-config/esphome/iot-plug-dyson.yaml:1)
+- Template fan: [configuration.yaml](/home/meiser79/Documents/GitHub/ha-config/configuration.yaml:255)
+- HomeKit include: [configuration.yaml](/home/meiser79/Documents/GitHub/ha-config/configuration.yaml:183)
+- Dyson state machine automation: [automations.yaml](/home/meiser79/Documents/GitHub/ha-config/automations.yaml:3593)
+- Readback decoder script: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:736)
+- IR command script: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:768)
+- Living/dining automatic adjust consumer: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:565)
+- A/C recommendation consumer: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:641)
+- Leaving-system consumer: [scripts.yaml](/home/meiser79/Documents/GitHub/ha-config/scripts.yaml:900)
+- Living-room UI card: [dashboards/main.yaml](/home/meiser79/Documents/GitHub/ha-config/dashboards/main.yaml:1806)
+- Offline UI entry: [dashboards/main.yaml](/home/meiser79/Documents/GitHub/ha-config/dashboards/main.yaml:5615)

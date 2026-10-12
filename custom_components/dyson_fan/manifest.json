@@ -1,13 +1,13 @@
 {
   "domain": "dyson_fan",
   "name": "Dyson Fan",
-  "codeowners": ["@myhades"],
+  "codeowners": ["@myhades", "@meiser79"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "infrared"],
-  "documentation": "https://github.com/myhades/ha-dyson-fan",
+  "documentation": "https://github.com/meiser79/ha-dyson-fan",
   "integration_type": "device",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/myhades/ha-dyson-fan/issues",
+  "issue_tracker": "https://github.com/meiser79/ha-dyson-fan/issues",
   "requirements": ["infrared-protocols>=10.0.0"],
   "version": "0.6.0"
 }

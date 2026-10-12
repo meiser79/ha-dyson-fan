@@ -2,8 +2,8 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![HACS](https://img.shields.io/badge/HACS-Custom-yellow.svg)](https://hacs.xyz/)
-[![Maintainer](https://img.shields.io/badge/maintainer-%40myhades-green)](https://github.com/myhades)
-[![Release](https://img.shields.io/github/v/release/myhades/ha-dyson-fan)](https://github.com/myhades/ha-dyson-fan/releases)
+[![Maintainer](https://img.shields.io/badge/maintainer-%40meiser79-green)](https://github.com/meiser79)
+[![Release](https://img.shields.io/github/v/release/meiser79/ha-dyson-fan)](https://github.com/meiser79/ha-dyson-fan/releases)
 
 ![Dyson Fan](assets/dyson_fan_repo_logo.png)
 
@@ -35,12 +35,12 @@ Choose your preferred installation method, and reboot Home Assistant afterward.
 
 This repository is not in the default list yet. To add it, use the My button below, or navigate to "HACS" > "Overflow menu" > "Custom repositories" and enter:
 
-- `Repository`: `https://github.com/myhades/ha-dyson-fan`
+- `Repository`: `https://github.com/meiser79/ha-dyson-fan`
 - `Type`: Integration
 
 Then, navigate to "HACS" > "Dyson Fan" and install the integration.
 
-[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=myhades&repository=ha-dyson-fan&category=integration)
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=meiser79&repository=ha-dyson-fan&category=integration)
 
 ### Method 2: Manually
 
