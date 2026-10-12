@@ -30,7 +30,7 @@ from homeassistant.core import (
     State,
     callback,
 )
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -268,8 +268,14 @@ class DysonFanController:
         if self.infrared_emitter_entity_id not in infrared.async_get_emitters(
             self.hass
         ):
-            raise HomeAssistantError(
-                f"Infrared emitter {self.infrared_emitter_entity_id} is not available"
+            # `async_get_emitters` only lists entities whose owning platform
+            # has already finished loading. Right after startup or a fresh
+            # entry, the emitter's own integration may simply not have
+            # loaded yet - that's a race, not a real misconfiguration - so
+            # ask Home Assistant to retry setup rather than failing hard.
+            raise ConfigEntryNotReady(
+                f"Infrared emitter {self.infrared_emitter_entity_id} is not "
+                "yet available"
             )
 
         validated_burst = None

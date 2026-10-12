@@ -14,7 +14,11 @@ from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryError,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
@@ -92,6 +96,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: DysonFanConfigEntry) -> 
     try:
         controller = DysonFanController(hass, entry)
         await controller.async_start()
+    except ConfigEntryNotReady:
+        # Let Home Assistant's built-in retry-with-backoff handle this;
+        # wrapping it as ConfigEntryError below would turn a transient "not
+        # loaded yet" race into a hard setup failure.
+        raise
     except (HomeAssistantError, KeyError, TypeError, ValueError, vol.Invalid) as err:
         raise ConfigEntryError(f"Invalid Dyson Fan configuration: {err}") from err
 
