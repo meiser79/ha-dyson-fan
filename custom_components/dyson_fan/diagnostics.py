@@ -21,6 +21,7 @@ async def async_get_config_entry_diagnostics(
             "infrared_emitter_entity_id": (
                 entry.runtime_data.controller.infrared_emitter_entity_id
             ),
+            "ir_timings": entry.runtime_data.controller.ir_timings,
             "feedback_burst_configured": (
                 entry.runtime_data.controller.feedback_burst_configured
             ),

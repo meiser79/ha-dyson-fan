@@ -54,11 +54,13 @@
       "init": {
         "menu_options": {
           "control": "Control behavior",
-          "power_table": "Power table"
+          "power_table": "Power table",
+          "ir_codes": "IR codes"
         },
         "menu_option_descriptions": {
           "control": "Change retry behavior and the interval between infrared transmissions.",
-          "power_table": "Change off and stationary wattage and the shared oscillation increment."
+          "power_table": "Change off and stationary wattage and the shared oscillation increment.",
+          "ir_codes": "Change the raw infrared timings used to encode every Dyson Cool command."
         }
       },
       "control": {
@@ -92,6 +94,36 @@
           "power_speed_9_stationary": "Speed 9, stationary",
           "power_speed_10_stationary": "Speed 10, stationary"
         }
+      },
+      "ir_codes": {
+        "title": "IR codes",
+        "description": "Choose System to use infrared-protocols' own published-spec Dyson Cool timings unmodified, or Custom to set your own six raw timings on the next screen.",
+        "data": {
+          "ir_timing_mode": "Timing source"
+        },
+        "data_description": {
+          "ir_timing_mode": "System uses the library default timings. Custom lets you set your own."
+        }
+      },
+      "ir_codes_custom": {
+        "title": "Custom IR timings",
+        "description": "Raw timings (in microseconds) used to build every transmitted infrared command. Defaults were measured against a physical Dyson AM07 remote.",
+        "data": {
+          "ir_header_mark": "Header mark",
+          "ir_header_space": "Header space",
+          "ir_bit_mark": "Bit mark",
+          "ir_zero_space": "Zero space",
+          "ir_one_space": "One space",
+          "ir_footer_mark": "Footer mark"
+        },
+        "data_description": {
+          "ir_header_mark": "Duration of the leading mark pulse.",
+          "ir_header_space": "Duration of the space following the header mark.",
+          "ir_bit_mark": "Duration of the mark pulse before every data bit.",
+          "ir_zero_space": "Space duration representing a 0 bit.",
+          "ir_one_space": "Space duration representing a 1 bit.",
+          "ir_footer_mark": "Duration of the trailing mark pulse."
+        }
       }
     },
     "error": {
@@ -115,6 +147,12 @@
         "SPEED_DOWN": "Speed down",
         "TIME_UP": "Timer up",
         "TIME_DOWN": "Timer down"
+      }
+    },
+    "ir_timing_mode": {
+      "options": {
+        "system": "System (published Dyson Cool spec)",
+        "custom": "Custom (your own measured timings)"
       }
     }
   },

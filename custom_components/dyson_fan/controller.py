@@ -69,6 +69,7 @@ from .const import (
     CONF_FEEDBACK_BURST_ACTION,
     CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
+    CONF_IR_TIMING_MODE,
     CONF_MAX_ATTEMPTS,
     CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_SENSOR,
@@ -77,11 +78,13 @@ from .const import (
     CONF_SPEED_UP_CODE,
     DEFAULT_CALIBRATION_MODE,
     DEFAULT_IR_SEND_INTERVAL,
+    DEFAULT_IR_TIMING_MODE,
     DEFAULT_MAX_ATTEMPTS,
     DOMAIN,
     EVENT_CALIBRATION_FINISHED,
     FEEDBACK_BURST_TIMEOUT_SECONDS,
     FEEDBACK_TIMEOUT_SECONDS,
+    IR_TIMING_MODE_CUSTOM,
     PERSIST_DELAY_SECONDS,
     POST_COMMAND_SETTLE_SECONDS,
     STABLE_REPORTS_REQUIRED,
@@ -96,6 +99,7 @@ from .const import (
     CalibrationMode,
 )
 from .feedback import ReportCadence, stable_window_average
+from .ir_codes import ConfigurableDysonCoolCommand, timings_from_options
 from .models import Command, DecodedPower, FanState, StableObservation, TargetState
 from .power import (
     InvalidPowerReading,
@@ -179,9 +183,15 @@ class DysonFanController:
         self.decoder = PowerDecoder(PowerSignatureTable.from_options(entry.options))
         self.tracker = StablePowerTracker(STABLE_REPORTS_REQUIRED)
 
+        self.ir_timing_mode = str(
+            entry.options.get(CONF_IR_TIMING_MODE, DEFAULT_IR_TIMING_MODE)
+        )
+        self.ir_timings = timings_from_options(entry.options)
         try:
             self._ir_commands: dict[Command, InfraredCommand] = {
-                command: DysonCoolCode[str(entry.data[code_key])].to_command()
+                command: self._build_ir_command(
+                    DysonCoolCode[str(entry.data[code_key])]
+                )
                 for command, code_key in _COMMAND_CODE_KEYS.items()
             }
         except KeyError as err:
@@ -720,6 +730,12 @@ class DysonFanController:
             command.value,
         )
         return True
+
+    def _build_ir_command(self, code: DysonCoolCode) -> InfraredCommand:
+        """Encode one Dyson Cool code with the library or the custom timings."""
+        if self.ir_timing_mode == IR_TIMING_MODE_CUSTOM:
+            return ConfigurableDysonCoolCommand(code=code.value, **self.ir_timings)
+        return code.to_command()
 
     async def _async_send_ir(self, command: InfraredCommand) -> None:
         """Transmit one prepared command through the infrared emitter entity."""
@@ -1602,6 +1618,7 @@ class DysonFanController:
             "power_sensor": self.power_sensor,
             "feedback_burst_configured": self.feedback_burst_configured,
             "ir_send_interval": self.ir_send_interval,
+            "ir_timing_mode": self.ir_timing_mode,
         }
 
 

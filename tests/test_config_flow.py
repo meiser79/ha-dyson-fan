@@ -21,7 +21,9 @@ from custom_components.dyson_fan.const import (
     CONF_CALIBRATION_MODE,
     CONF_FEEDBACK_BURST_ACTION,
     CONF_INFRARED_EMITTER_ENTITY_ID,
+    CONF_IR_BIT_MARK,
     CONF_IR_SEND_INTERVAL,
+    CONF_IR_TIMING_MODE,
     CONF_MAX_ATTEMPTS,
     CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_OFF,
@@ -161,7 +163,7 @@ async def test_options_flow(hass: HomeAssistant) -> None:
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["control", "power_table"]
+    assert result["menu_options"] == ["control", "ir_codes", "power_table"]
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "control"}
     )
@@ -178,6 +180,35 @@ async def test_options_flow(hass: HomeAssistant) -> None:
     assert entry.options["max_attempts"] == 2
     assert entry.options["ir_send_interval"] == 0.5
     assert entry.options[CONF_CALIBRATION_MODE] == CalibrationMode.FULL
+
+
+async def test_custom_ir_timings_are_saved_in_two_steps(hass: HomeAssistant) -> None:
+    """Custom timings are only stored once the second step is submitted."""
+    entry = MockConfigEntry(domain=DOMAIN, version=3, data=_valid_input())
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "ir_codes"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_IR_TIMING_MODE: "custom"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "ir_codes_custom"
+    assert CONF_IR_TIMING_MODE not in entry.options
+
+    timings = {
+        marker.schema: marker.default() for marker in result["data_schema"].schema
+    }
+    assert len(timings) == 6
+    timings[CONF_IR_BIT_MARK] = 700
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], timings
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_IR_TIMING_MODE] == "custom"
+    assert entry.options[CONF_IR_BIT_MARK] == 700
 
 
 async def test_power_table_input_is_rounded_before_validation_and_storage(

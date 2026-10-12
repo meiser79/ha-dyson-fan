@@ -66,6 +66,8 @@ The setup flow asks for:
 
 The available codes are `ON`, `COOL_ON`, `OFF`, `SWING`, `SPEED_UP`, `SPEED_DOWN`, `TIME_UP`, and `TIME_DOWN`. Genuine Dyson remotes send separate `ON` and `OFF` codes rather than a single toggle, so for the power slot you may need to test which code your fan actually responds to. The integration always sends the same configured code whenever it wants to flip power and relies on the power sensor to confirm what happened.
 
+Codes are transmitted with the raw IR timings set under "Options" > "IR codes": **System** uses the `infrared-protocols` published timings (850 µs / 1660 µs bit timings), **Custom** lets you set six values in microseconds (header mark, header space, bit mark, zero space, one space, footer mark). Timings measured against a physical Dyson AM07 remote (790 µs / 1590 µs) are listed in [`custom_components/dyson_fan/ir_codes.py`](custom_components/dyson_fan/ir_codes.py); if your fan does not respond with the system timings, switch to Custom and enter them.
+
 After setup, the fan entity becomes available once several power reports establish a stable state. While the fan is off, its speed cannot be observed from power readings, so the integration remembers the last known speed for the next power-on.
 
 To change the power sensor, infrared emitter, or any configured code, select "Reconfigure" from the integration menu.
@@ -110,6 +112,7 @@ Automations can listen for the `dyson_fan_calibration_finished` event without en
 |------------------|-----------|------------------------------------------------|
 | Maximum attempts | 1         | Increase this if IR commands are occasionally missed; 1 disables retries.|
 | IR send interval | 0.35s     | Time between consecutive IR actions. Adjust this to suit your IR transmitter: too short an interval may cause missed commands, while a longer interval causes slow feedback. Calibration uses an interval of at least 1 second. |
+| IR codes | System | System uses the `infrared-protocols` timings; Custom lets you enter six raw timings in µs (e.g. AM07-measured 790/1590). |
 | Calibration mode | Endpoints | "Endpoints" mode uses measurements at speeds 1 and 10 to shift and scale the current power curve. "Full" mode measures all ten speeds individually and takes longer. |
 | Power table      | N/A       | Power values in W used to identify the fan's state: the oscillation increment, off power, and stationary power at speeds 1–10. Values can be edited manually. Select the restore checkbox and submit to replace them with the built-in table.|
 

@@ -35,6 +35,7 @@ from .const import (
     CONF_FEEDBACK_BURST_ACTION,
     CONF_INFRARED_EMITTER_ENTITY_ID,
     CONF_IR_SEND_INTERVAL,
+    CONF_IR_TIMING_MODE,
     CONF_MAX_ATTEMPTS,
     CONF_OSCILLATION_TOGGLE_CODE,
     CONF_POWER_OFF,
@@ -46,15 +47,21 @@ from .const import (
     CONF_SPEED_UP_CODE,
     DEFAULT_CALIBRATION_MODE,
     DEFAULT_IR_SEND_INTERVAL,
+    DEFAULT_IR_TIMING_MODE,
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_NAME,
     DOMAIN,
+    IR_TIMING_MODE_CUSTOM,
+    IR_TIMING_MODE_SYSTEM,
     MAX_IR_SEND_INTERVAL,
+    MAX_IR_TIMING_MICROSECONDS,
     MIN_IR_SEND_INTERVAL,
+    MIN_IR_TIMING_MICROSECONDS,
     SPEED_COUNT,
     CalibrationMode,
     power_signature_key,
 )
+from .ir_codes import IR_TIMINGS, timings_from_options
 from .power import (
     InvalidPowerReading,
     PowerSignatureTable,
@@ -238,7 +245,7 @@ class DysonFanOptionsFlow(config_entries.OptionsFlowWithReload):
         """Show an options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["control", "power_table"],
+            menu_options=["control", "ir_codes", "power_table"],
         )
 
     async def async_step_control(
@@ -300,6 +307,59 @@ class DysonFanOptionsFlow(config_entries.OptionsFlowWithReload):
             }
         )
         return self.async_show_form(step_id="control", data_schema=schema)
+
+    async def async_step_ir_codes(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose between the library's default timings (System) and fully
+        custom ones (Custom)."""
+        if user_input is not None:
+            mode = user_input[CONF_IR_TIMING_MODE]
+            if mode == IR_TIMING_MODE_SYSTEM:
+                options = dict(self.config_entry.options)
+                options[CONF_IR_TIMING_MODE] = IR_TIMING_MODE_SYSTEM
+                return self.async_create_entry(data=options)
+            # Custom: save nothing yet. Options forms cannot enable fields
+            # conditionally, so the six timings are collected in a second step.
+            return await self.async_step_ir_codes_custom()
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_IR_TIMING_MODE,
+                    default=self.config_entry.options.get(
+                        CONF_IR_TIMING_MODE, DEFAULT_IR_TIMING_MODE
+                    ),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[IR_TIMING_MODE_SYSTEM, IR_TIMING_MODE_CUSTOM],
+                        translation_key="ir_timing_mode",
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="ir_codes", data_schema=schema)
+
+    async def async_step_ir_codes_custom(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure the six raw infrared timings used when Custom mode is
+        selected."""
+        if user_input is not None:
+            options = dict(self.config_entry.options)
+            options[CONF_IR_TIMING_MODE] = IR_TIMING_MODE_CUSTOM
+            options.update(user_input)
+            return self.async_create_entry(data=options)
+
+        timings = timings_from_options(self.config_entry.options)
+        schema = vol.Schema(
+            {
+                vol.Required(key, default=timings[name]): _timing_input()
+                for name, (key, _default) in IR_TIMINGS.items()
+            }
+        )
+        return self.async_show_form(step_id="ir_codes_custom", data_schema=schema)
 
     async def async_step_power_table(
         self, user_input: dict[str, Any] | None = None
@@ -366,6 +426,19 @@ def _power_input() -> NumberSelector:
             max=100,
             step=0.01,
             unit_of_measurement="W",
+            mode=NumberSelectorMode.BOX,
+        )
+    )
+
+
+def _timing_input() -> NumberSelector:
+    """Return the standard IR timing input selector (microseconds)."""
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=MIN_IR_TIMING_MICROSECONDS,
+            max=MAX_IR_TIMING_MICROSECONDS,
+            step=1,
+            unit_of_measurement="\u00b5s",
             mode=NumberSelectorMode.BOX,
         )
     )

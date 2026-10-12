@@ -54,11 +54,13 @@
       "init": {
         "menu_options": {
           "control": "Steuerung",
-          "power_table": "Leistungstabelle"
+          "power_table": "Leistungstabelle",
+          "ir_codes": "IR-Codes"
         },
         "menu_option_descriptions": {
           "control": "Versuche und IR-Sendeintervall anpassen.",
-          "power_table": "Leistungswerte und Mehrleistung beim Schwenken anpassen."
+          "power_table": "Leistungswerte und Mehrleistung beim Schwenken anpassen.",
+          "ir_codes": "Die rohen Infrarot-Zeiten für alle Dyson-Cool-Befehle anpassen."
         }
       },
       "control": {
@@ -92,6 +94,36 @@
           "power_speed_9_stationary": "Stufe 9",
           "power_speed_10_stationary": "Stufe 10"
         }
+      },
+      "ir_codes": {
+        "title": "IR-Codes",
+        "description": "System verwendet die veröffentlichten Dyson-Cool-Zeiten von infrared-protocols unverändert; Benutzerdefiniert erlaubt eigene Rohzeiten im nächsten Schritt.",
+        "data": {
+          "ir_timing_mode": "Zeitquelle"
+        },
+        "data_description": {
+          "ir_timing_mode": "System nutzt die Standardzeiten der Bibliothek. Benutzerdefiniert erlaubt eigene Werte."
+        }
+      },
+      "ir_codes_custom": {
+        "title": "Benutzerdefinierte IR-Zeiten",
+        "description": "Rohzeiten (in Mikrosekunden) für jeden gesendeten Infrarotbefehl. Die Standardwerte wurden an einer echten Dyson-AM07-Fernbedienung gemessen.",
+        "data": {
+          "ir_header_mark": "Header-Impuls",
+          "ir_header_space": "Header-Pause",
+          "ir_bit_mark": "Bit-Impuls",
+          "ir_zero_space": "Pause für 0-Bit",
+          "ir_one_space": "Pause für 1-Bit",
+          "ir_footer_mark": "Abschlussimpuls"
+        },
+        "data_description": {
+          "ir_header_mark": "Dauer des einleitenden Impulses.",
+          "ir_header_space": "Dauer der Pause nach dem Header-Impuls.",
+          "ir_bit_mark": "Dauer des Impulses vor jedem Datenbit.",
+          "ir_zero_space": "Pausendauer für ein 0-Bit.",
+          "ir_one_space": "Pausendauer für ein 1-Bit.",
+          "ir_footer_mark": "Dauer des abschließenden Impulses."
+        }
       }
     },
     "error": {
@@ -115,6 +147,12 @@
         "SPEED_DOWN": "Stufe senken",
         "TIME_UP": "Timer erhöhen",
         "TIME_DOWN": "Timer senken"
+      }
+    },
+    "ir_timing_mode": {
+      "options": {
+        "system": "System (veröffentlichte Dyson-Cool-Spezifikation)",
+        "custom": "Benutzerdefiniert (eigene gemessene Zeiten)"
       }
     }
   },

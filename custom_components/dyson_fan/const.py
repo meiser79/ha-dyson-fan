@@ -38,6 +38,26 @@ COMMAND_CODE_KEYS: Final = (
     CONF_SPEED_DOWN_CODE,
 )
 
+# Raw IR timings (in microseconds) used to encode every Dyson Cool command
+# above - see .ir_codes.ConfigurableDysonCoolCommand. These are Options,
+# not initial setup data, since they're a device-specific tuning knob
+# separate from which entity/codes to use.
+#
+# Whether they're actually used depends on CONF_IR_TIMING_MODE: "system"
+# uses infrared-protocols' own DysonCoolCommand (published-spec timings,
+# 850us/1660us) unmodified; "custom" uses the six fields below.
+CONF_IR_TIMING_MODE: Final = "ir_timing_mode"
+IR_TIMING_MODE_SYSTEM: Final = "system"
+IR_TIMING_MODE_CUSTOM: Final = "custom"
+DEFAULT_IR_TIMING_MODE: Final = IR_TIMING_MODE_SYSTEM
+
+CONF_IR_HEADER_MARK: Final = "ir_header_mark"
+CONF_IR_HEADER_SPACE: Final = "ir_header_space"
+CONF_IR_BIT_MARK: Final = "ir_bit_mark"
+CONF_IR_ZERO_SPACE: Final = "ir_zero_space"
+CONF_IR_ONE_SPACE: Final = "ir_one_space"
+CONF_IR_FOOTER_MARK: Final = "ir_footer_mark"
+
 # The optional feedback-burst helper is not part of the Dyson protocol; it
 # runs an arbitrary Home Assistant action (e.g. against a power meter), so it
 # keeps the generic action-sequence approach rather than a Dyson IR code.
@@ -61,6 +81,11 @@ DEFAULT_IR_SEND_INTERVAL: Final = 0.35
 DEFAULT_CALIBRATION_MODE: Final = CalibrationMode.ENDPOINTS
 MIN_IR_SEND_INTERVAL: Final = 0.05
 MAX_IR_SEND_INTERVAL: Final = 3.0
+
+# Bounds for the configurable IR timing fields (microseconds). Generous
+# since exact values depend entirely on the physical remote being matched.
+MIN_IR_TIMING_MICROSECONDS: Final = 0
+MAX_IR_TIMING_MICROSECONDS: Final = 10000
 
 # This integration controls non-heating Dyson fans. A reading above this limit is
 # treated as a broken/wrong feedback source instead of being decoded to the

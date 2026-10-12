@@ -10,6 +10,7 @@ import pytest
 from homeassistant.core import Context, HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from infrared_protocols.codes.dyson.cool import DysonCoolCode
+from infrared_protocols.commands.dyson import DysonCoolCommand
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.dyson_fan.const import (
@@ -564,3 +565,29 @@ async def test_first_power_on_learns_unknown_speed_and_converges(
     assert controller.accepted == FanState(True, 4, True)
     assert controller.last_speed == 4
     await controller.async_shutdown()
+
+
+async def test_ir_commands_use_the_configured_timings(hass: HomeAssistant) -> None:
+    """System mode uses the library encoding; Custom mode the configured timings."""
+    system = DysonFanController(hass, _entry())
+    custom = DysonFanController(
+        hass,
+        MockConfigEntry(
+            domain=DOMAIN,
+            data=_entry().data,
+            options={"ir_timing_mode": "custom", "ir_bit_mark": 700},
+        ),
+    )
+    library = DysonCoolCode.SPEED_UP.to_command()
+
+    system_command = system._ir_commands[Command.SPEED_UP]
+    custom_command = custom._ir_commands[Command.SPEED_UP]
+
+    assert type(system_command) is DysonCoolCommand
+    assert system_command.get_raw_timings() == library.get_raw_timings()
+    assert custom_command.code == DysonCoolCode.SPEED_UP.value
+    assert custom_command.get_raw_timings()[2] == 700
+    # Only the bit mark differs from the AM07 defaults; the payload bits are shared.
+    assert [abs(value) > 1000 for value in custom_command.get_raw_timings()] == [
+        abs(value) > 1000 for value in library.get_raw_timings()
+    ]
