@@ -297,6 +297,7 @@ async def test_feedback_window_uses_actual_cadence(
     monkeypatch.setattr(module, "POST_COMMAND_SETTLE_SECONDS", 0)
     entry = _entry()
     controller = DysonFanController(hass, entry)
+    controller.feedback_timeout_seconds = 0  # isolate the cadence-based budget
     controller.target_revision = 1
     controller.during_attempt = True
     controller._async_run_feedback_burst = AsyncMock()
@@ -565,6 +566,22 @@ async def test_first_power_on_learns_unknown_speed_and_converges(
     assert controller.accepted == FanState(True, 4, True)
     assert controller.last_speed == 4
     await controller.async_shutdown()
+
+
+async def test_feedback_timeout_never_undercuts_the_stability_path(
+    hass: HomeAssistant,
+) -> None:
+    """Report-on-change sensors may need the full stability timeout to confirm."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=_entry().data,
+        options={"stability_timeout_seconds": 100},
+    )
+    controller = DysonFanController(hass, entry)
+
+    assert controller.feedback_timeout_seconds == 120
+    assert controller._feedback_timeout() == 120
+    assert controller._calibration_measurement_timeout() == 120
 
 
 async def test_ir_commands_use_the_configured_timings(hass: HomeAssistant) -> None:

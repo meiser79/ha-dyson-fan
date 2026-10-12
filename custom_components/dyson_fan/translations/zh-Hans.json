@@ -68,11 +68,13 @@
         "data": {
           "max_attempts": "最大尝试次数",
           "ir_send_interval": "红外发送间隔",
+          "stability_timeout_seconds": "稳定超时",
           "calibration_mode": "校准模式"
         },
         "data_description": {
           "max_attempts": "首次完整发送计为一次尝试。只有稳定反馈与目标不符时才会进行额外尝试。",
           "ir_send_interval": "连续两次红外发送之间的间隔。",
+          "stability_timeout_seconds": "读数在没有矛盾上报的情况下保持多久后，即使没有 3 次相同上报也视为稳定。适用于仅在变化时上报的功率传感器（例如某些 Zigbee 插座）。",
           "calibration_mode": "端点模式根据 1 档和 10 档对当前曲线进行平移和缩放；完整模式会测量每个不摆风档位。"
         }
       },

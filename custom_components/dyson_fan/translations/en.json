@@ -68,11 +68,13 @@
         "data": {
           "max_attempts": "Maximum attempts",
           "ir_send_interval": "Infrared send interval",
+          "stability_timeout_seconds": "Stability timeout",
           "calibration_mode": "Calibration mode"
         },
         "data_description": {
           "max_attempts": "A complete initial command is one attempt. Additional attempts are only made after stable feedback does not match the target.",
           "ir_send_interval": "Time between consecutive infrared command transmissions.",
+          "stability_timeout_seconds": "How long a reading may hold, uncontradicted, before it is accepted as stable even without 3 separate matching reports. Useful for report-on-change power sensors (e.g. some Zigbee plugs) that stay silent while the reading is unchanged.",
           "calibration_mode": "Endpoints shifts and scales the current curve from speeds 1 and 10. Full measures every stationary speed."
         }
       },

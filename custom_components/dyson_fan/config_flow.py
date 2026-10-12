@@ -45,18 +45,22 @@ from .const import (
     CONF_RESTORE_DEFAULT_POWER_TABLE,
     CONF_SPEED_DOWN_CODE,
     CONF_SPEED_UP_CODE,
+    CONF_STABILITY_TIMEOUT_SECONDS,
     DEFAULT_CALIBRATION_MODE,
     DEFAULT_IR_SEND_INTERVAL,
     DEFAULT_IR_TIMING_MODE,
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_NAME,
+    DEFAULT_STABILITY_TIMEOUT_SECONDS,
     DOMAIN,
     IR_TIMING_MODE_CUSTOM,
     IR_TIMING_MODE_SYSTEM,
     MAX_IR_SEND_INTERVAL,
     MAX_IR_TIMING_MICROSECONDS,
+    MAX_STABILITY_TIMEOUT_SECONDS,
     MIN_IR_SEND_INTERVAL,
     MIN_IR_TIMING_MICROSECONDS,
+    MIN_STABILITY_TIMEOUT_SECONDS,
     SPEED_COUNT,
     CalibrationMode,
     power_signature_key,
@@ -251,7 +255,8 @@ class DysonFanOptionsFlow(config_entries.OptionsFlowWithReload):
     async def async_step_control(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Configure retry count and the IR send interval."""
+        """Configure retry count, IR send interval, and the stability
+        timeout."""
         if user_input is not None:
             options = dict(self.config_entry.options)
             options.update(user_input)
@@ -286,6 +291,23 @@ class DysonFanOptionsFlow(config_entries.OptionsFlowWithReload):
                         min=MIN_IR_SEND_INTERVAL,
                         max=MAX_IR_SEND_INTERVAL,
                         step=0.05,
+                        unit_of_measurement="s",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_STABILITY_TIMEOUT_SECONDS,
+                    default=float(
+                        self.config_entry.options.get(
+                            CONF_STABILITY_TIMEOUT_SECONDS,
+                            DEFAULT_STABILITY_TIMEOUT_SECONDS,
+                        )
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_STABILITY_TIMEOUT_SECONDS,
+                        max=MAX_STABILITY_TIMEOUT_SECONDS,
+                        step=1,
                         unit_of_measurement="s",
                         mode=NumberSelectorMode.BOX,
                     )

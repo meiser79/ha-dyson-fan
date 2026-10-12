@@ -68,11 +68,13 @@
         "data": {
           "max_attempts": "Maximale Versuche",
           "ir_send_interval": "IR-Sendeintervall",
+          "stability_timeout_seconds": "Stabilitäts-Timeout",
           "calibration_mode": "Kalibriermodus"
         },
         "data_description": {
           "max_attempts": "Die erste vollständige Befehlsfolge zählt als ein Versuch. Weitere Versuche erfolgen nur, wenn die stabile Rückmeldung vom Ziel abweicht.",
           "ir_send_interval": "Zeit zwischen zwei IR-Sendungen.",
+          "stability_timeout_seconds": "Wie lange ein Messwert ohne widersprechenden Wert bestehen darf, bis er auch ohne 3 gleiche Messungen als stabil gilt. Nützlich für Leistungssensoren, die nur bei Änderungen senden (z. B. manche Zigbee-Steckdosen).",
           "calibration_mode": "Endpunkte: Die aktuelle Kurve anhand der Stufen 1 und 10 verschieben und skalieren. Vollständig: Jede Stufe ohne Schwenken messen."
         }
       },

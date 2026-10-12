@@ -33,6 +33,7 @@ from custom_components.dyson_fan.const import (
     CONF_RESTORE_DEFAULT_POWER_TABLE,
     CONF_SPEED_DOWN_CODE,
     CONF_SPEED_UP_CODE,
+    CONF_STABILITY_TIMEOUT_SECONDS,
     DOMAIN,
     CalibrationMode,
     power_signature_key,
@@ -173,12 +174,14 @@ async def test_options_flow(hass: HomeAssistant) -> None:
         {
             "max_attempts": 2,
             "ir_send_interval": 0.5,
+            CONF_STABILITY_TIMEOUT_SECONDS: 30,
             CONF_CALIBRATION_MODE: CalibrationMode.FULL,
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["max_attempts"] == 2
     assert entry.options["ir_send_interval"] == 0.5
+    assert entry.options[CONF_STABILITY_TIMEOUT_SECONDS] == 30
     assert entry.options[CONF_CALIBRATION_MODE] == CalibrationMode.FULL
 
 

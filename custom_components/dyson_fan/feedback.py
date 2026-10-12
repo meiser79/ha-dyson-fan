@@ -13,6 +13,7 @@ from .const import (
     CALIBRATION_MIN_OBSERVATION_SECONDS,
     CALIBRATION_SLOW_REPORT_INTERVAL_SECONDS,
 )
+from .power import round_power_watts
 
 
 class ReportCadence:
@@ -69,3 +70,15 @@ def stable_window_average(samples: list[tuple[float, float]]) -> float | None:
     if window[-1][0] - window[0][0] < CALIBRATION_MIN_OBSERVATION_SECONDS:
         return None
     return robust_power_average([watts for _, watts in window])
+
+
+def best_effort_average(samples: list[tuple[float, float]]) -> float | None:
+    """Median of a partial window, for readings that never settled in time.
+
+    Used shortly before a calibration measurement's deadline, when the sensor
+    keeps reporting but never forms the tight window `stable_window_average`
+    requires (for example noisier draw at high fan speed).
+    """
+    if not samples:
+        return None
+    return round_power_watts(median(watts for _, watts in samples))

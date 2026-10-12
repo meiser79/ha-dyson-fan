@@ -3,7 +3,11 @@
 import pytest
 
 from custom_components.dyson_fan.calibration import robust_power_average
-from custom_components.dyson_fan.feedback import ReportCadence, stable_window_average
+from custom_components.dyson_fan.feedback import (
+    ReportCadence,
+    best_effort_average,
+    stable_window_average,
+)
 
 
 def test_changing_tail_is_not_discarded_as_an_outlier() -> None:
@@ -44,3 +48,10 @@ def test_fast_meter_must_observe_time_not_only_count() -> None:
 
 def test_slow_meter_only_needs_three_recent_stable_reports() -> None:
     assert stable_window_average([(10, 6.5), (20, 6.6), (30, 6.4)]) == 6.5
+
+
+def test_best_effort_average_is_a_rounded_median() -> None:
+    """Partial, noisy windows still give a usable measurement."""
+    assert best_effort_average([]) is None
+    assert best_effort_average([(0.0, 10.0), (1.0, 10.4), (2.0, 9.8)]) == 10.0
+    assert best_effort_average([(0.0, 1.231), (1.0, 1.233)]) == 1.23

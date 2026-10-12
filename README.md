@@ -68,7 +68,7 @@ The available codes are `ON`, `COOL_ON`, `OFF`, `SWING`, `SPEED_UP`, `SPEED_DOWN
 
 Codes are transmitted with the raw IR timings set under "Options" > "IR codes": **System** uses the `infrared-protocols` published timings (850 µs / 1660 µs bit timings), **Custom** lets you set six values in microseconds (header mark, header space, bit mark, zero space, one space, footer mark). Timings measured against a physical Dyson AM07 remote (790 µs / 1590 µs) are listed in [`custom_components/dyson_fan/ir_codes.py`](custom_components/dyson_fan/ir_codes.py); if your fan does not respond with the system timings, switch to Custom and enter them.
 
-After setup, the fan entity becomes available once several power reports establish a stable state. While the fan is off, its speed cannot be observed from power readings, so the integration remembers the last known speed for the next power-on.
+After setup, the fan entity becomes available once a stable state is recognized: either several consecutive matching power reports, or, for report-on-change sensors that stay silent while the reading is unchanged (some Zigbee plugs), once the reading has held for the stability timeout (default 45 s) without a contradicting report. While the fan is off, its speed cannot be observed from power readings, so the integration remembers the last known speed for the next power-on.
 
 To change the power sensor, infrared emitter, or any configured code, select "Reconfigure" from the integration menu.
 
@@ -93,6 +93,8 @@ The integration turns the fan off if it is running, waits several seconds for os
 
 Each measurement uses multiple power readings, with outliers removed before averaging. The waiting time adapts to the sensor's reporting interval. The new table is saved only after the measurements pass validation; a failed or interrupted measurement leaves the existing table unchanged. After calibration, the integration attempts to restore the fan's previous power, speed, and oscillation settings unless a new Home Assistant command has taken over.
 
+For report-on-change sensors that stay silent when a reading has not changed (for example the very first "off" measurement, if the fan is already off), a measurement falls back to the last known valid reading once it has held for the stability timeout. The per-measurement timeout scales with the same setting.
+
 </details>
 
 <details>
@@ -112,6 +114,7 @@ Automations can listen for the `dyson_fan_calibration_finished` event without en
 |------------------|-----------|------------------------------------------------|
 | Maximum attempts | 1         | Increase this if IR commands are occasionally missed; 1 disables retries.|
 | IR send interval | 0.35s     | Time between consecutive IR actions. Adjust this to suit your IR transmitter: too short an interval may cause missed commands, while a longer interval causes slow feedback. Calibration uses an interval of at least 1 second. |
+| Stability timeout | 45s | How long a reading may hold, uncontradicted, before it is accepted as stable without 3 separate matching reports. The feedback and calibration timeouts are automatically kept at least this value plus 20 s. |
 | IR codes | System | System uses the `infrared-protocols` timings; Custom lets you enter six raw timings in µs (e.g. AM07-measured 790/1590). |
 | Calibration mode | Endpoints | "Endpoints" mode uses measurements at speeds 1 and 10 to shift and scale the current power curve. "Full" mode measures all ten speeds individually and takes longer. |
 | Power table      | N/A       | Power values in W used to identify the fan's state: the oscillation increment, off power, and stationary power at speeds 1–10. Values can be edited manually. Select the restore checkbox and submit to replace them with the built-in table.|

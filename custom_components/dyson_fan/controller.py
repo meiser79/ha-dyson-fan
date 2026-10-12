@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import monotonic
 from typing import Any
 
@@ -35,6 +35,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_state_report_event,
+    async_track_time_interval,
 )
 from homeassistant.helpers.script import Script, async_validate_actions_config
 from homeassistant.helpers.storage import Store
@@ -50,6 +51,7 @@ from .calibration import (
     build_full_calibrated_table,
 )
 from .const import (
+    CALIBRATION_BEST_EFFORT_MARGIN_SECONDS,
     CALIBRATION_ENDPOINT_CHANGE_FLOOR_WATTS,
     CALIBRATION_ENDPOINT_CHANGE_RATIO,
     CALIBRATION_FULL_STEP_FLOOR_WATTS,
@@ -76,17 +78,21 @@ from .const import (
     CONF_POWER_TOGGLE_CODE,
     CONF_SPEED_DOWN_CODE,
     CONF_SPEED_UP_CODE,
+    CONF_STABILITY_TIMEOUT_SECONDS,
     DEFAULT_CALIBRATION_MODE,
     DEFAULT_IR_SEND_INTERVAL,
     DEFAULT_IR_TIMING_MODE,
     DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_STABILITY_TIMEOUT_SECONDS,
     DOMAIN,
     EVENT_CALIBRATION_FINISHED,
     FEEDBACK_BURST_TIMEOUT_SECONDS,
+    FEEDBACK_TIMEOUT_BUFFER_SECONDS,
     FEEDBACK_TIMEOUT_SECONDS,
     IR_TIMING_MODE_CUSTOM,
     PERSIST_DELAY_SECONDS,
     POST_COMMAND_SETTLE_SECONDS,
+    STABILITY_TIMEOUT_CHECK_INTERVAL_SECONDS,
     STABLE_REPORTS_REQUIRED,
     STATE_CALIBRATING,
     STATE_ERROR,
@@ -98,7 +104,7 @@ from .const import (
     STORAGE_VERSION,
     CalibrationMode,
 )
-from .feedback import ReportCadence, stable_window_average
+from .feedback import ReportCadence, best_effort_average, stable_window_average
 from .ir_codes import ConfigurableDysonCoolCommand, timings_from_options
 from .models import Command, DecodedPower, FanState, StableObservation, TargetState
 from .power import (
@@ -179,6 +185,23 @@ class DysonFanController:
         )
         self.calibration_mode = CalibrationMode(
             entry.options.get(CONF_CALIBRATION_MODE, DEFAULT_CALIBRATION_MODE)
+        )
+        self.stability_timeout_seconds = float(
+            entry.options.get(
+                CONF_STABILITY_TIMEOUT_SECONDS, DEFAULT_STABILITY_TIMEOUT_SECONDS
+            )
+        )
+        # The post-command feedback wait must always be able to accommodate the
+        # timeout-based stability path, or a command can never confirm in time.
+        self.feedback_timeout_seconds = max(
+            FEEDBACK_TIMEOUT_SECONDS,
+            self.stability_timeout_seconds + FEEDBACK_TIMEOUT_BUFFER_SECONDS,
+        )
+        # Same reasoning for calibration: a measurement must be able to wait at
+        # least stability_timeout_seconds for a silent report-on-change sensor.
+        self.calibration_measurement_timeout_seconds = max(
+            CALIBRATION_MEASUREMENT_TIMEOUT_SECONDS,
+            self.stability_timeout_seconds + FEEDBACK_TIMEOUT_BUFFER_SECONDS,
         )
         self.decoder = PowerDecoder(PowerSignatureTable.from_options(entry.options))
         self.tracker = StablePowerTracker(STABLE_REPORTS_REQUIRED)
@@ -305,14 +328,19 @@ class DysonFanController:
                 logger=self._action_logger,
             )
 
-        self._unsubscribers.append(
-            async_track_state_change_event(
-                self.hass, self.power_sensor, self._async_on_state_changed
-            )
-        )
-        self._unsubscribers.append(
-            async_track_state_report_event(
-                self.hass, self.power_sensor, self._async_on_state_reported
+        self._unsubscribers.extend(
+            (
+                async_track_state_change_event(
+                    self.hass, self.power_sensor, self._async_on_state_changed
+                ),
+                async_track_state_report_event(
+                    self.hass, self.power_sensor, self._async_on_state_reported
+                ),
+                async_track_time_interval(
+                    self.hass,
+                    self._async_check_stability_timeout,
+                    timedelta(seconds=STABILITY_TIMEOUT_CHECK_INTERVAL_SECONDS),
+                ),
             )
         )
 
@@ -814,39 +842,53 @@ class DysonFanController:
                 "[%s] Unexpected automatic calibration failure", self.entry.entry_id
             )
         finally:
+            # Deliberately NOT re-enabling _samples_enabled here. Doing so
+            # would open a window, between calibration finishing and
+            # restore's worker actually reading self.supposed, in which a
+            # real incoming power report could get accepted and silently
+            # overwrite the just-confirmed post-calibration state before
+            # restore ever uses it. The worker restore runs through below
+            # (_async_execute_target -> _async_wait_for_feedback) already
+            # re-enables sampling at the correct, safe moment; the finally
+            # block further below is a safety net for paths that skip or
+            # abort before reaching that point.
             self._calibration_requested = False
-            self._samples_enabled = True
             self.tracker.reset()
             self._wake_event.set()
 
-        if not user_cancelled and not self._shutting_down:
-            try:
-                self.calibration_step = "restoring"
-                self._notify_listeners()
-                await self._async_restore_after_calibration(restore_target)
-            except CalibrationCancelled:
-                user_cancelled = True
-                if self.calibration_result == "success":
-                    self.calibration_result = "success_restore_cancelled"
-                elif self.calibration_result == "failed":
-                    self.calibration_result = "failed_restore_cancelled"
-                else:
-                    self.calibration_result = "cancelled"
-                    self.calibration_error = None
-            except (CalibrationError, TimeoutError, HomeAssistantError) as err:
-                self._log.warning(
-                    "[%s] Calibration state restoration failed: %s",
-                    self.entry.entry_id,
-                    err,
-                )
-                suffix = f"restore_failed: {err}"
-                self.calibration_error = (
-                    f"{self.calibration_error}; {suffix}"
-                    if self.calibration_error
-                    else suffix
-                )
-                if self.calibration_result == "success":
-                    self.calibration_result = "success_restore_failed"
+        try:
+            if not user_cancelled and not self._shutting_down:
+                try:
+                    self.calibration_step = "restoring"
+                    self._notify_listeners()
+                    await self._async_restore_after_calibration(restore_target)
+                except CalibrationCancelled:
+                    user_cancelled = True
+                    if self.calibration_result == "success":
+                        self.calibration_result = "success_restore_cancelled"
+                    elif self.calibration_result == "failed":
+                        self.calibration_result = "failed_restore_cancelled"
+                    else:
+                        self.calibration_result = "cancelled"
+                        self.calibration_error = None
+                except (CalibrationError, TimeoutError, HomeAssistantError) as err:
+                    self._log.warning(
+                        "[%s] Calibration state restoration failed: %s",
+                        self.entry.entry_id,
+                        err,
+                    )
+                    suffix = f"restore_failed: {err}"
+                    self.calibration_error = (
+                        f"{self.calibration_error}; {suffix}"
+                        if self.calibration_error
+                        else suffix
+                    )
+                    if self.calibration_result == "success":
+                        self.calibration_result = "success_restore_failed"
+        finally:
+            # Guaranteed re-enable on every path (normally a no-op, because
+            # _async_wait_for_feedback already did this on a successful restore).
+            self._samples_enabled = True
 
         if user_cancelled:
             self._ensure_worker()
@@ -1147,7 +1189,12 @@ class DysonFanController:
         *,
         accept: Callable[[float], bool] | None = None,
     ) -> float:
-        """Measure an adaptive, outlier-filtered average from fresh reports."""
+        """Measure an adaptive, outlier-filtered average from fresh reports.
+
+        When no stable window can form, `_measurement_fallback` supplies a last
+        known or best-effort reading. Every candidate still has to pass
+        `accept`.
+        """
         self.calibration_step = f"measuring_{label}"
         self._log.debug(
             "[%s] Calibration measurement started: %s; report_interval=%s s",
@@ -1161,7 +1208,11 @@ class DysonFanController:
         await asyncio.sleep(CALIBRATION_MEASUREMENT_SETTLE_SECONDS)
         self._check_calibration_revision(revision)
 
+        def acceptable(value: float | None) -> bool:
+            return value is not None and (accept is None or accept(value))
+
         start_sequence = self._raw_sequence
+        quiet_since = monotonic()
         samples: list[tuple[float, float]] = []
         measured: float | None = None
         self._wake_event.clear()
@@ -1169,41 +1220,54 @@ class DysonFanController:
             started = self.hass.loop.time()
             async with asyncio.timeout(None) as timeout:
                 while True:
-                    timeout.reschedule(
-                        started
-                        + self._report_cadence.timeout(
-                            CALIBRATION_MEASUREMENT_TIMEOUT_SECONDS, 5
-                        )
-                    )
+                    deadline = started + self._calibration_measurement_timeout()
+                    timeout.reschedule(deadline)
                     self._check_calibration_revision(revision)
                     if not self._source_valid:
                         raise CalibrationError("Power sensor is unavailable or invalid")
+
                     samples = [
                         (timestamp, watts)
                         for sequence, timestamp, watts in self._raw_samples
                         if sequence > start_sequence
                     ]
                     measured = stable_window_average(samples)
-                    if measured is not None and (accept is None or accept(measured)):
+                    result = measured if acceptable(measured) else None
+                    if result is None:
+                        fallback = self._measurement_fallback(
+                            samples,
+                            quiet_since=quiet_since,
+                            remaining=deadline - self.hass.loop.time(),
+                        )
+                        if acceptable(fallback):
+                            result = fallback
+                            self._log.debug(
+                                "[%s] Calibration measurement %s used a fallback "
+                                "reading from %d report(s)",
+                                self.entry.entry_id,
+                                label,
+                                len(samples),
+                            )
+                    if result is not None:
                         self._log.debug(
                             "[%s] Calibration measurement %s: %.3f W; reports=%s, "
                             "elapsed=%.2f s, report_interval=%s s",
                             self.entry.entry_id,
                             label,
-                            measured,
+                            result,
                             self._raw_sequence - start_sequence,
                             self.hass.loop.time() - started,
                             self._report_cadence.interval,
                         )
-                        self.calibration_measurements[label] = measured
+                        self.calibration_measurements[label] = result
                         self._notify_listeners()
-                        return measured
+                        return result
 
-                    observed_sequence = self._raw_sequence
+                    # Poll periodically rather than waiting indefinitely, so the
+                    # fallbacks are re-checked even if no new report arrives.
                     self._wake_event.clear()
-                    if self._raw_sequence != observed_sequence:
-                        continue
-                    await self._wake_event.wait()
+                    with suppress(TimeoutError):
+                        await asyncio.wait_for(self._wake_event.wait(), timeout=1.0)
         except TimeoutError as err:
             self._log.debug(
                 "[%s] Calibration measurement %s timed out: reason=%s, reports=%s, "
@@ -1225,6 +1289,30 @@ class DysonFanController:
             raise CalibrationError(
                 f"Timed out waiting for stable power at {label}"
             ) from err
+
+    def _measurement_fallback(
+        self,
+        samples: list[tuple[float, float]],
+        *,
+        quiet_since: float,
+        remaining: float,
+    ) -> float | None:
+        """Return a reading to use when no stable window has formed.
+
+        A report-on-change sensor (some Zigbee plugs) publishes nothing while
+        the reading is unchanged, so once it has been silent for the stability
+        timeout its last valid reading is the measurement. A sensor that keeps
+        reporting but never settles gets a best-effort median of what arrived,
+        shortly before the deadline, instead of failing the whole calibration.
+        """
+        if self.last_decoded is not None:
+            last_report = self._raw_samples[-1][1] if self._raw_samples else 0.0
+            silent_for = monotonic() - max(last_report, quiet_since)
+            if silent_for >= self.stability_timeout_seconds:
+                return round_power_watts(self.last_decoded.watts)
+        if remaining <= CALIBRATION_BEST_EFFORT_MARGIN_SECONDS:
+            return best_effort_average(samples)
+        return None
 
     async def _async_apply_calibration_result(self, result: CalibrationResult) -> None:
         """Commit a fully validated calibration to options and runtime state."""
@@ -1282,7 +1370,7 @@ class DysonFanController:
             async with asyncio.timeout(
                 max(
                     CALIBRATION_RESTORE_TIMEOUT_SECONDS,
-                    self._report_cadence.timeout(FEEDBACK_TIMEOUT_SECONDS, 3) * 2
+                    self._feedback_timeout() * 2
                     + 12 * self.ir_send_interval
                     + FEEDBACK_BURST_TIMEOUT_SECONDS * 3,
                 )
@@ -1305,6 +1393,26 @@ class DysonFanController:
             or revision != self.target_revision
         ):
             raise CalibrationCancelled
+
+    def _feedback_timeout(self) -> float:
+        """Budget for a stable post-command reading.
+
+        Follows the sensor's observed cadence, but never undercuts the
+        stability-timeout path used by report-on-change sensors.
+        """
+        return max(
+            self._report_cadence.timeout(
+                FEEDBACK_TIMEOUT_SECONDS, STABLE_REPORTS_REQUIRED
+            ),
+            self.feedback_timeout_seconds,
+        )
+
+    def _calibration_measurement_timeout(self) -> float:
+        """Budget for one calibration measurement, with the same two floors."""
+        return max(
+            self._report_cadence.timeout(CALIBRATION_MEASUREMENT_TIMEOUT_SECONDS, 5),
+            self.calibration_measurement_timeout_seconds,
+        )
 
     async def _async_wait_for_feedback(self, revision: int) -> FanState | None:
         """Open a fresh stable-sample window after commands settle."""
@@ -1331,12 +1439,7 @@ class DysonFanController:
             started = self.hass.loop.time()
             async with asyncio.timeout(None) as timeout:
                 while revision == self.target_revision:
-                    timeout.reschedule(
-                        started
-                        + self._report_cadence.timeout(
-                            FEEDBACK_TIMEOUT_SECONDS, STABLE_REPORTS_REQUIRED
-                        )
-                    )
+                    timeout.reschedule(started + self._feedback_timeout())
                     if self._feedback_sequence > start_sequence:
                         self._log.debug(
                             "[%s] Feedback confirmed: %s; elapsed=%.2f s, reports=%s",
@@ -1452,12 +1555,32 @@ class DysonFanController:
             self._notify_listeners()
             return
 
-        stable = self.tracker.add(decoded)
+        stable = self.tracker.add(decoded, monotonic())
         self.stable_report_count = self.tracker.count
         if stable is not None:
             self._async_accept_observation(stable)
         else:
             self._notify_listeners()
+
+    @callback
+    def _async_check_stability_timeout(self, _now: datetime) -> None:
+        """Periodically accept the current reading as stable once it has
+        held long enough without a contradicting report.
+
+        Runs on a timer independent of sensor events, since a report-on-
+        change power sensor (e.g. some Zigbee plugs) that stays genuinely
+        steady may simply never publish another message to hang this off
+        of.
+        """
+        if not self._samples_enabled or not self._source_valid:
+            return
+
+        stable = self.tracker.check_timeout(
+            monotonic(), self.stability_timeout_seconds
+        )
+        self.stable_report_count = self.tracker.count
+        if stable is not None:
+            self._async_accept_observation(stable)
 
     @callback
     def _async_accept_observation(self, observation: StableObservation) -> None:
@@ -1506,6 +1629,13 @@ class DysonFanController:
                     oscillating=accepted.oscillating,
                 )
                 self.phase = STATE_IDLE
+                if self.last_error == "feedback_timeout":
+                    # A late report - arriving after the worker's own wait
+                    # window gave up - can still self-correct the phase back
+                    # to idle here. Clear the stale timeout error so
+                    # diagnostics reflects reality: the command did succeed,
+                    # just slower than the window allowed for at the time.
+                    self.last_error = None
             else:
                 self._ensure_worker()
         self._notify_listeners()
@@ -1603,6 +1733,11 @@ class DysonFanController:
             "max_attempts": self.max_attempts,
             "stable_report_count": self.stable_report_count,
             "stable_reports_required": STABLE_REPORTS_REQUIRED,
+            "stability_timeout_seconds": self.stability_timeout_seconds,
+            "feedback_timeout_seconds": self.feedback_timeout_seconds,
+            "calibration_measurement_timeout_seconds": (
+                self.calibration_measurement_timeout_seconds
+            ),
             "target_revision": self.target_revision,
             "handled_revision": self.handled_revision,
             "accepted": self.accepted.as_dict() if self.accepted else None,

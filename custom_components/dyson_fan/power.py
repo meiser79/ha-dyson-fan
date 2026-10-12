@@ -155,7 +155,15 @@ class PowerDecoder:
 
 
 class StablePowerTracker:
-    """Confirm a decoded state after repeated matching sensor reports."""
+    """Confirm a decoded state after repeated matching sensor reports, or
+    after it has held for long enough without a contradicting report.
+
+    The latter path exists for report-on-change sensors (some Zigbee power
+    plugs, e.g. IKEA INSPELNING) that simply stay silent while the reading
+    is unchanged rather than repeating it - with only event-driven
+    confirmation, a genuinely steady but quiet sensor would never produce
+    the required number of samples.
+    """
 
     def __init__(self, required_reports: int) -> None:
         """Initialize the tracker."""
@@ -164,19 +172,23 @@ class StablePowerTracker:
         self.required_reports = required_reports
         self.candidate: DecodedPower | None = None
         self.count = 0
+        self.candidate_since: float | None = None
         self._emitted = False
 
     def reset(self) -> None:
         """Forget all samples in the current feedback window."""
         self.candidate = None
         self.count = 0
+        self.candidate_since = None
         self._emitted = False
 
-    def add(self, decoded: DecodedPower) -> StableObservation | None:
-        """Add a report and return an observation once it becomes stable."""
+    def add(self, decoded: DecodedPower, now: float) -> StableObservation | None:
+        """Add a report, observed at monotonic time `now`, and return an
+        observation once it becomes stable."""
         if self.candidate is None or self.candidate.state != decoded.state:
             self.candidate = decoded
             self.count = 1
+            self.candidate_since = now
             self._emitted = False
         else:
             # Retain the newest raw wattage and residual for diagnostics.
@@ -184,6 +196,22 @@ class StablePowerTracker:
             self.count += 1
 
         if self.count < self.required_reports or self._emitted:
+            return None
+
+        self._emitted = True
+        return StableObservation(decoded=self.candidate, report_count=self.count)
+
+    def check_timeout(
+        self, now: float, timeout_seconds: float
+    ) -> StableObservation | None:
+        """Accept the current candidate as stable if it has held, unchanged
+        and uncontradicted, for at least `timeout_seconds` since it was
+        first observed - regardless of how many reports arrived while it
+        held. Returns None if there's no candidate yet, it was already
+        emitted, or the timeout hasn't elapsed."""
+        if self.candidate is None or self._emitted or self.candidate_since is None:
+            return None
+        if now - self.candidate_since < timeout_seconds:
             return None
 
         self._emitted = True

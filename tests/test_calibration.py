@@ -314,6 +314,7 @@ async def test_power_increase_that_never_arrives_times_out(
     controller.target_revision = 1
     controller._source_valid = True
     controller._async_run_feedback_burst = AsyncMock()
+    controller.calibration_measurement_timeout_seconds = 0
     monkeypatch.setattr(controller._report_cadence, "timeout", lambda *_: 0.02)
     with pytest.raises(CalibrationError, match="Timed out"):
         await controller._async_measure_stable_power(
@@ -555,3 +556,35 @@ async def test_successful_calibration_commits_whole_table_once(
         entry.options[key] == value for key, value in result.table.as_options().items()
     )
     controller._async_restore_after_calibration.assert_awaited_once()
+
+
+async def test_silent_sensor_falls_back_to_its_last_reading(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A report-on-change sensor that stays silent still yields a measurement."""
+    from custom_components.dyson_fan import controller as controller_module
+
+    controller = DysonFanController(hass, _entry())
+    controller.stability_timeout_seconds = 45
+    controller.last_decoded = controller.decoder.decode(1.234)
+    controller._raw_samples.append((1, 100.0, 1.234))
+
+    monkeypatch.setattr(controller_module, "monotonic", lambda: 120.0)
+    assert controller._measurement_fallback([], quiet_since=100.0, remaining=30) is None
+
+    monkeypatch.setattr(controller_module, "monotonic", lambda: 160.0)
+    assert controller._measurement_fallback([], quiet_since=100.0, remaining=30) == 1.23
+
+
+async def test_unsettled_sensor_gets_a_best_effort_median_near_the_deadline(
+    hass: HomeAssistant,
+) -> None:
+    """A noisy but reporting sensor does not fail the whole calibration."""
+    controller = DysonFanController(hass, _entry())
+    samples = [(0.0, 10.0), (1.0, 10.4), (2.0, 9.8)]
+
+    early = controller._measurement_fallback(samples, quiet_since=0, remaining=30)
+    late = controller._measurement_fallback(samples, quiet_since=0, remaining=2)
+
+    assert early is None
+    assert late == 10.0

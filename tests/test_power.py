@@ -81,19 +81,43 @@ def test_invalid_or_unsafe_power(decoder: PowerDecoder, value: object) -> None:
 def test_stability_uses_reports_not_watt_equality(decoder: PowerDecoder) -> None:
     """Slightly different wattages can confirm the same decoded physical state."""
     tracker = StablePowerTracker(3)
-    assert tracker.add(decoder.decode(18.0)) is None
-    assert tracker.add(decoder.decode(18.2)) is None
-    stable = tracker.add(decoder.decode(18.4))
+    assert tracker.add(decoder.decode(18.0), 0.0) is None
+    assert tracker.add(decoder.decode(18.2), 1.0) is None
+    stable = tracker.add(decoder.decode(18.4), 2.0)
     assert stable is not None
     assert stable.decoded.state == FanState(True, 5, False)
-    assert tracker.add(decoder.decode(18.3)) is None
+    assert tracker.add(decoder.decode(18.3), 3.0) is None
 
 
 def test_stability_resets_when_decoded_state_changes(decoder: PowerDecoder) -> None:
     """A different decoded state starts a new consecutive report run."""
     tracker = StablePowerTracker(2)
-    assert tracker.add(decoder.decode(18.2)) is None
-    assert tracker.add(decoder.decode(22.8)) is None
-    stable = tracker.add(decoder.decode(22.9))
+    assert tracker.add(decoder.decode(18.2), 0.0) is None
+    assert tracker.add(decoder.decode(22.8), 1.0) is None
+    stable = tracker.add(decoder.decode(22.9), 2.0)
     assert stable is not None
     assert stable.decoded.state.speed == 6
+
+
+def test_steady_quiet_sensor_is_accepted_after_the_timeout(
+    decoder: PowerDecoder,
+) -> None:
+    """A report-on-change sensor never sends the required number of reports."""
+    tracker = StablePowerTracker(3)
+    assert tracker.add(decoder.decode(18.2), 100.0) is None
+    assert tracker.check_timeout(120.0, 45) is None
+    stable = tracker.check_timeout(146.0, 45)
+    assert stable is not None
+    assert stable.decoded.state == FanState(True, 5, False)
+    assert tracker.check_timeout(200.0, 45) is None
+
+
+def test_timeout_restarts_when_the_decoded_state_changes(
+    decoder: PowerDecoder,
+) -> None:
+    """The hold time is measured from the first report of the current state."""
+    tracker = StablePowerTracker(3)
+    assert tracker.add(decoder.decode(18.2), 0.0) is None
+    assert tracker.add(decoder.decode(22.8), 40.0) is None
+    assert tracker.check_timeout(50.0, 45) is None
+    assert tracker.check_timeout(86.0, 45) is not None

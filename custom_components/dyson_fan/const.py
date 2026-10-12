@@ -65,6 +65,7 @@ CONF_FEEDBACK_BURST_ACTION: Final = "feedback_burst_action"
 
 CONF_MAX_ATTEMPTS: Final = "max_attempts"
 CONF_IR_SEND_INTERVAL: Final = "ir_send_interval"
+CONF_STABILITY_TIMEOUT_SECONDS: Final = "stability_timeout_seconds"
 CONF_CALIBRATION_MODE: Final = "calibration_mode"
 CONF_RESTORE_DEFAULT_POWER_TABLE: Final = "restore_default_power_table"
 
@@ -81,6 +82,8 @@ DEFAULT_IR_SEND_INTERVAL: Final = 0.35
 DEFAULT_CALIBRATION_MODE: Final = CalibrationMode.ENDPOINTS
 MIN_IR_SEND_INTERVAL: Final = 0.05
 MAX_IR_SEND_INTERVAL: Final = 3.0
+MIN_STABILITY_TIMEOUT_SECONDS: Final = 5.0
+MAX_STABILITY_TIMEOUT_SECONDS: Final = 300.0
 
 # Bounds for the configurable IR timing fields (microseconds). Generous
 # since exact values depend entirely on the physical remote being matched.
@@ -95,11 +98,28 @@ POWER_TABLE_DECIMAL_PLACES: Final = 2
 
 SPEED_COUNT: Final = 10
 STABLE_REPORTS_REQUIRED: Final = 3
+
+# Fallback path for report-on-change power sensors (e.g. some Zigbee plugs)
+# that stay silent while the reading is unchanged instead of repeating it.
+# If the current candidate reading has held, uncontradicted, for this long,
+# accept it as stable even without STABLE_REPORTS_REQUIRED separate reports.
+# Checked on a periodic timer since a silent sensor produces no events to
+# hook this off of. User-configurable via CONF_STABILITY_TIMEOUT_SECONDS;
+# this is only the fallback used when that option is unset.
+DEFAULT_STABILITY_TIMEOUT_SECONDS: Final = 45.0
+STABILITY_TIMEOUT_CHECK_INTERVAL_SECONDS: Final = 10.0
 POST_COMMAND_SETTLE_SECONDS: Final = 1.0
 FEEDBACK_TIMEOUT_SECONDS: Final = 15.0
 FEEDBACK_BURST_TIMEOUT_SECONDS: Final = 5.0
 DIAGNOSTICS_UPDATE_INTERVAL_SECONDS: Final = 5.0
 EVENT_CALIBRATION_FINISHED: Final = f"{DOMAIN}_calibration_finished"
+
+# Extra time added on top of the stability timeout when waiting for post-command
+# feedback or a calibration measurement. The timeout-based stability path can
+# never fire inside a window shorter than the timeout itself, and report-on-change
+# sensors may also take several seconds to publish their first post-command
+# reading, independent of the stability timeout.
+FEEDBACK_TIMEOUT_BUFFER_SECONDS: Final = 20.0
 PERSIST_DELAY_SECONDS: Final = 5.0
 
 STORAGE_VERSION: Final = 1
@@ -150,6 +170,14 @@ CALIBRATION_FULL_STEP_REFERENCE_RATIO: Final = 0.3
 CALIBRATION_OSCILLATION_DELTA_MIN_WATTS: Final = 0.5
 CALIBRATION_OSCILLATION_DELTA_MAX_WATTS: Final = 10.0
 CALIBRATION_RESTORE_TIMEOUT_SECONDS: Final = 60.0
+
+# How close to the per-measurement deadline (calibration_measurement_timeout_
+# seconds) a measurement may get before falling back to a best-effort median
+# of whatever partial, non-silent, non-fully-stable samples arrived. Covers
+# sensors that report somewhat often but never quite settle into 5 tightly
+# clustered readings (e.g. genuinely noisier draw at high fan speed) - a
+# case neither the strict median nor the total-silence fallback handles.
+CALIBRATION_BEST_EFFORT_MARGIN_SECONDS: Final = 3.0
 
 
 def power_signature_key(speed: int, oscillating: bool) -> str:
